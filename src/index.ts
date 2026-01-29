@@ -230,6 +230,8 @@ interface ExecutionResult {
   executionCount: number | null;
   outputs: NotebookOutput[];
   text: string;
+  images: { data: string; mimeType: string }[];  // Base64-encoded images
+  html: string[];  // HTML outputs (for rich reprs)
 }
 
 async function executeCode(
@@ -244,6 +246,8 @@ async function executeCode(
     const msgId = crypto.randomUUID();
     const outputs: NotebookOutput[] = [];
     const textParts: string[] = [];
+    const images: { data: string; mimeType: string }[] = [];
+    const htmlParts: string[] = [];
     let status: "ok" | "error" = "ok";
     let executionCount: number | null = null;
 
@@ -299,7 +303,19 @@ async function executeCode(
             data: msg.content.data,
             metadata: msg.content.metadata || {},
           });
+          // Extract text
           textParts.push(msg.content.data?.["text/plain"] || "");
+          // Extract images
+          if (msg.content.data?.["image/png"]) {
+            images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
+          }
+          if (msg.content.data?.["image/jpeg"]) {
+            images.push({ data: msg.content.data["image/jpeg"], mimeType: "image/jpeg" });
+          }
+          // Extract HTML (for rich reprs like pandas, xarray)
+          if (msg.content.data?.["text/html"]) {
+            htmlParts.push(msg.content.data["text/html"]);
+          }
           break;
 
         case "display_data":
@@ -308,7 +324,17 @@ async function executeCode(
             data: msg.content.data,
             metadata: msg.content.metadata || {},
           });
-          textParts.push(msg.content.data?.["text/plain"] || "[display data]");
+          textParts.push(msg.content.data?.["text/plain"] || "");
+          // Extract images from display_data (matplotlib, etc.)
+          if (msg.content.data?.["image/png"]) {
+            images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
+          }
+          if (msg.content.data?.["image/jpeg"]) {
+            images.push({ data: msg.content.data["image/jpeg"], mimeType: "image/jpeg" });
+          }
+          if (msg.content.data?.["text/html"]) {
+            htmlParts.push(msg.content.data["text/html"]);
+          }
           break;
 
         case "error":
@@ -331,6 +357,8 @@ async function executeCode(
             executionCount,
             outputs,
             text: textParts.join(""),
+            images,
+            html: htmlParts,
           });
           break;
       }
@@ -341,6 +369,90 @@ async function executeCode(
       reject(err);
     });
   });
+}
+
+// Generate a unified diff between two strings
+function generateUnifiedDiff(
+  oldStr: string,
+  newStr: string,
+  filename: string
+): string {
+  const oldLines = oldStr.split("\n");
+  const newLines = newStr.split("\n");
+
+  // Simple line-by-line diff
+  const diffLines: string[] = [];
+  diffLines.push(`--- ${filename} (before)`);
+  diffLines.push(`+++ ${filename} (after)`);
+
+  // Find changed regions
+  const maxLen = Math.max(oldLines.length, newLines.length);
+  let inChange = false;
+  let changeStart = 0;
+  const changes: { oldStart: number; oldLines: string[]; newLines: string[] }[] = [];
+  let currentOld: string[] = [];
+  let currentNew: string[] = [];
+
+  for (let i = 0; i <= maxLen; i++) {
+    const oldLine = i < oldLines.length ? oldLines[i] : undefined;
+    const newLine = i < newLines.length ? newLines[i] : undefined;
+
+    if (oldLine !== newLine) {
+      if (!inChange) {
+        inChange = true;
+        changeStart = i;
+        currentOld = [];
+        currentNew = [];
+      }
+      if (oldLine !== undefined) currentOld.push(oldLine);
+      if (newLine !== undefined) currentNew.push(newLine);
+    } else if (inChange) {
+      changes.push({ oldStart: changeStart, oldLines: currentOld, newLines: currentNew });
+      inChange = false;
+    }
+  }
+
+  if (inChange) {
+    changes.push({ oldStart: changeStart, oldLines: currentOld, newLines: currentNew });
+  }
+
+  // Format hunks
+  for (const change of changes) {
+    const contextStart = Math.max(0, change.oldStart - 2);
+    const oldEnd = change.oldStart + change.oldLines.length;
+    const newEnd = change.oldStart + change.newLines.length;
+
+    diffLines.push(
+      `@@ -${change.oldStart + 1},${change.oldLines.length} +${change.oldStart + 1},${change.newLines.length} @@`
+    );
+
+    // Add context before
+    for (let i = contextStart; i < change.oldStart && i < oldLines.length; i++) {
+      diffLines.push(` ${oldLines[i]}`);
+    }
+
+    // Add removed lines
+    for (const line of change.oldLines) {
+      diffLines.push(`-${line}`);
+    }
+
+    // Add added lines
+    for (const line of change.newLines) {
+      diffLines.push(`+${line}`);
+    }
+
+    // Add context after
+    const contextEnd = Math.min(oldLines.length, oldEnd + 2);
+    for (let i = oldEnd; i < contextEnd; i++) {
+      diffLines.push(` ${oldLines[i]}`);
+    }
+  }
+
+  if (changes.length === 0) {
+    return "(no changes)";
+  }
+
+  return diffLines.join("\n");
 }
 
 // Update a cell's outputs in the Y.Doc
@@ -671,11 +783,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           index === undefined || index === -1 ? cells.length : index;
         cells.insert(insertIndex, [newCell]);
 
+        // Show what was inserted
+        const insertDiff = [
+          `--- ${path}:cell[${insertIndex}] (new ${cell_type} cell)`,
+          `+++ ${path}:cell[${insertIndex}]`,
+          `@@ -0,0 +1,${source.split("\n").length} @@`,
+          ...source.split("\n").map((line) => `+${line}`),
+        ].join("\n");
+
         return {
           content: [
             {
               type: "text",
-              text: `Cell inserted at index ${insertIndex}`,
+              text: insertDiff,
             },
           ],
         };
@@ -701,23 +821,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const cell = cells.get(index) as Y.Map<any>;
+
+        // Capture old source for diff
+        const oldSource = extractSource(cell);
+
         if (cell instanceof Y.Map) {
           const sourceField = cell.get("source");
           if (sourceField instanceof Y.Text) {
-            // Update existing Y.Text
             sourceField.delete(0, sourceField.length);
             sourceField.insert(0, source);
           } else {
-            // Replace with new Y.Text
             cell.set("source", new Y.Text(source));
           }
         }
+
+        // Generate unified diff
+        const diff = generateUnifiedDiff(
+          oldSource,
+          source,
+          `${path}:cell[${index}]`
+        );
 
         return {
           content: [
             {
               type: "text",
-              text: `Cell ${index} updated`,
+              text: diff,
             },
           ],
         };
@@ -738,13 +867,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Capture source before deleting
+        const cell = cells.get(index) as Y.Map<any>;
+        const oldSource = extractSource(cell);
+        const cellType = getCellType(cell);
+
         cells.delete(index, 1);
+
+        // Show what was deleted
+        const deleteDiff = [
+          `--- ${path}:cell[${index}] (deleted ${cellType} cell)`,
+          `+++ /dev/null`,
+          `@@ -1,${oldSource.split("\n").length} +0,0 @@`,
+          ...oldSource.split("\n").map((line) => `-${line}`),
+        ].join("\n");
 
         return {
           content: [
             {
               type: "text",
-              text: `Cell ${index} deleted`,
+              text: deleteDiff,
             },
           ],
         };
@@ -780,14 +922,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           updateCellOutputs(cell, result);
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: result.text || "(no output)",
-            },
-          ],
-        };
+        // Build response with text and images
+        const content: any[] = [
+          {
+            type: "text",
+            text: result.text || "(no output)",
+          },
+        ];
+        // Add images
+        for (const img of result.images) {
+          content.push({
+            type: "image",
+            data: img.data,
+            mimeType: img.mimeType,
+          });
+        }
+
+        return { content };
       }
 
       case "execute_code": {
@@ -825,26 +976,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const result = await executeCode(session.kernelId, code);
           updateCellOutputs(newCell, result);
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Cell inserted at index ${cells.length - 1}\n\nOutput:\n${result.text || "(no output)"}`,
-              },
-            ],
-          };
+          // Build response with text and images
+          const content: any[] = [
+            {
+              type: "text",
+              text: `Cell inserted at index ${cells.length - 1}\n\nOutput:\n${result.text || "(no output)"}`,
+            },
+          ];
+          // Add images
+          for (const img of result.images) {
+            content.push({
+              type: "image",
+              data: img.data,
+              mimeType: img.mimeType,
+            });
+          }
+
+          return { content };
         } else {
           // Execute without inserting a cell
           const result = await executeCode(session.kernelId, code);
 
-          return {
-            content: [
-              {
-                type: "text",
-                text: result.text || "(no output)",
-              },
-            ],
-          };
+          // Build response with text and images
+          const content: any[] = [
+            {
+              type: "text",
+              text: result.text || "(no output)",
+            },
+          ];
+          // Add images
+          for (const img of result.images) {
+            content.push({
+              type: "image",
+              data: img.data,
+              mimeType: img.mimeType,
+            });
+          }
+
+          return { content };
         }
       }
 
