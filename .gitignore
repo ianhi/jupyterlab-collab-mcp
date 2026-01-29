@@ -28,5 +28,5 @@ dist/
 __pycache__/
 *.py[cod]
 
-# uv lock files in subdirs
-test-jupyter/uv.lock
+# Test environment (local only)
+test-jupyter/

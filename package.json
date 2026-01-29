@@ -2,6 +2,21 @@
   "name": "jupyterlab-claude-code",
   "version": "0.1.0",
   "description": "MCP server for JupyterLab notebook collaboration with Claude Code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ianthomas23/jupyterlab-claude-code.git"
+  },
+  "keywords": [
+    "mcp",
+    "jupyterlab",
+    "jupyter",
+    "notebook",
+    "claude",
+    "ai",
+    "real-time",
+    "collaboration"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "bin": {

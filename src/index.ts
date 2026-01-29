@@ -151,18 +151,7 @@ async function connectToNotebook(
     },
   });
 
-  // Set awareness with all required fields for JupyterLab collaborators panel
-  provider.awareness.setLocalStateField("user", {
-    username: "claude-code",
-    name: "Claude Code",
-    display_name: "Claude Code",
-    initials: "CC",
-    color: "#ff6b6b",
-  });
-  // Set current document
-  provider.awareness.setLocalStateField("current", `json:notebook:${session.fileId}`);
-
-  // Wait for sync
+  // Wait for sync BEFORE setting awareness (ensures proper broadcast)
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       provider.destroy();
@@ -181,6 +170,16 @@ async function connectToNotebook(
       provider.destroy();
       reject(new Error(`Connection error: ${event.message || event}`));
     });
+  });
+
+  // Set awareness AFTER sync with all required fields for JupyterLab collaborators panel
+  // Note: JupyterLab only looks for the "user" field with User.IIdentity structure
+  provider.awareness.setLocalStateField("user", {
+    username: "claude-code",
+    name: "Claude Code",
+    display_name: "Claude Code",
+    initials: "CC",
+    color: "#ff6b6b",
   });
 
   // Cache connection
@@ -523,7 +522,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "connect_jupyter",
         description:
-          "Connect to a JupyterLab server. Call this first with the JupyterLab URL (including token). Example: http://localhost:8888/lab?token=abc123",
+          "Connect to a JupyterLab server. MUST be called first before using any other jupyter tools. Provide the full URL including token. Example: http://localhost:8888/lab?token=abc123",
         inputSchema: {
           type: "object",
           properties: {
@@ -539,7 +538,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "list_notebooks",
         description:
-          "List all open notebooks in JupyterLab with active kernel sessions",
+          "List all open notebooks in JupyterLab with active kernel sessions. Returns notebook paths and kernel IDs. Requires connect_jupyter first.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -563,7 +562,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             include_outputs: {
               type: "boolean",
-              description: "Include cell outputs. WARNING: Can be very large with rich outputs like plots/dataframes. Only use when specifically asked about outputs. Default: false",
+              description: "Include cell outputs. Default: false",
+            },
+            output_format: {
+              type: "string",
+              enum: ["text", "structured"],
+              description: "Output format: 'text' (default) returns just text/plain as a string, 'structured' returns full output metadata",
             },
             start_index: {
               type: "number",
@@ -580,7 +584,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "insert_cell",
         description:
-          "Insert a new cell into the notebook. The cell will appear immediately in JupyterLab.",
+          "Insert a new cell into the notebook. Changes sync in real-time to JupyterLab browser. Returns a diff showing what was inserted.",
         inputSchema: {
           type: "object",
           properties: {
@@ -608,7 +612,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_cell",
-        description: "Update the source code of an existing cell",
+        description: "Update the source code of an existing cell. Changes sync in real-time to JupyterLab browser. Returns a diff showing what changed.",
         inputSchema: {
           type: "object",
           properties: {
@@ -630,7 +634,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "delete_cell",
-        description: "Delete a cell from the notebook",
+        description: "Delete a cell from the notebook. Changes sync in real-time to JupyterLab browser. Returns a diff showing what was deleted.",
         inputSchema: {
           type: "object",
           properties: {
@@ -664,7 +668,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_cell",
         description:
-          "Execute a cell in the notebook and show outputs in JupyterLab. Returns the output to Claude as well.",
+          "Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are returned here. Supports text output and images.",
         inputSchema: {
           type: "object",
           properties: {
@@ -683,7 +687,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_code",
         description:
-          "Execute Python code in the notebook's kernel. Optionally insert as a new cell with visible outputs.",
+          "Execute arbitrary Python code in the notebook's kernel without modifying the notebook. Set insertCell=true to also add the code as a new cell with visible outputs in JupyterLab.",
         inputSchema: {
           type: "object",
           properties: {
@@ -702,6 +706,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path", "code"],
+        },
+      },
+      {
+        name: "search_notebook",
+        description:
+          "Search/grep through notebook cells for a pattern (regex supported). Returns matching cells with source code and/or outputs. Useful for finding errors, tracebacks, variable usage, or specific text.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            pattern: {
+              type: "string",
+              description: "Search pattern (regex supported)",
+            },
+            search_in: {
+              type: "string",
+              enum: ["source", "outputs", "all"],
+              description: "Where to search: 'source' (code), 'outputs', or 'all' (default)",
+            },
+            case_sensitive: {
+              type: "boolean",
+              description: "Case-sensitive search. Default: false",
+            },
+          },
+          required: ["path", "pattern"],
         },
       },
     ],
@@ -767,12 +799,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path,
           cell_type = "code",
           include_outputs = false,
+          output_format = "text",
           start_index = 0,
           end_index,
         } = args as {
           path: string;
           cell_type?: "all" | "code" | "markdown";
           include_outputs?: boolean;
+          output_format?: "text" | "structured";
           start_index?: number;
           end_index?: number;
         };
@@ -805,21 +839,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           if (include_outputs && type === "code") {
             const outputs = cell instanceof Y.Map ? cell.get("outputs") : cell?.outputs;
             if (outputs) {
-              // Convert Y.Array to JSON if needed
               const outputsJson = outputs instanceof Y.Array ? outputs.toJSON() : outputs;
-              // Summarize large outputs
-              cellData.outputs = outputsJson.map((out: any) => {
-                // For display_data/execute_result, only include text/plain by default
-                if (out.data && (out.output_type === "display_data" || out.output_type === "execute_result")) {
-                  return {
-                    output_type: out.output_type,
-                    text: out.data["text/plain"] || "[rich output - image/html]",
-                    has_image: !!out.data["image/png"] || !!out.data["image/jpeg"],
-                    has_html: !!out.data["text/html"],
-                  };
+
+              if (output_format === "text") {
+                // Text-only format: combine all text outputs into a single string
+                const textParts: string[] = [];
+                for (const out of outputsJson) {
+                  if (out.output_type === "stream") {
+                    textParts.push(out.text || "");
+                  } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+                    const text = out.data?.["text/plain"];
+                    if (text) textParts.push(text);
+                  } else if (out.output_type === "error") {
+                    textParts.push(`${out.ename}: ${out.evalue}`);
+                  }
                 }
-                return out;
-              });
+                const combinedText = textParts.join("");
+                if (combinedText) {
+                  cellData.output = combinedText;
+                }
+              } else {
+                // Structured format: full output metadata
+                cellData.outputs = outputsJson.map((out: any) => {
+                  if (out.data && (out.output_type === "display_data" || out.output_type === "execute_result")) {
+                    return {
+                      output_type: out.output_type,
+                      text: out.data["text/plain"] || "[rich output]",
+                      has_image: !!out.data["image/png"] || !!out.data["image/jpeg"],
+                      has_html: !!out.data["text/html"],
+                    };
+                  }
+                  return out;
+                });
+              }
             }
             cellData.execution_count = cell instanceof Y.Map ? cell.get("execution_count") : cell?.execution_count;
           }
@@ -989,19 +1041,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc, provider } = await connectToNotebook(path, session?.kernelId);
         const awareness = provider.awareness;
         const cells = doc.getArray("cells");
-
-        // Build a map of Y.Text ID to cell index
-        const ytextToCellIndex = new Map<any, number>();
-        for (let i = 0; i < cells.length; i++) {
-          const cell = cells.get(i) as Y.Map<any>;
-          if (cell instanceof Y.Map) {
-            const source = cell.get("source");
-            if (source instanceof Y.Text) {
-              // Use the Y.Text's internal ID/reference
-              ytextToCellIndex.set(source, i);
-            }
-          }
-        }
 
         // Get all awareness states
         const states = awareness.getStates();
@@ -1202,6 +1241,108 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           return { content };
         }
+      }
+
+      case "search_notebook": {
+        const {
+          path,
+          pattern,
+          search_in = "all",
+          case_sensitive = false,
+        } = args as {
+          path: string;
+          pattern: string;
+          search_in?: "source" | "outputs" | "all";
+          case_sensitive?: boolean;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const flags = case_sensitive ? "g" : "gi";
+        let regex: RegExp;
+        try {
+          regex = new RegExp(pattern, flags);
+        } catch {
+          // If invalid regex, escape and use as literal string
+          regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
+        }
+
+        const matches: any[] = [];
+
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells.get(i) as any;
+          const type = getCellType(cell);
+          const source = extractSource(cell);
+
+          const cellMatches: any = {
+            index: i,
+            type,
+          };
+          let hasMatch = false;
+
+          // Search in source
+          if (search_in === "source" || search_in === "all") {
+            const sourceMatches = source.match(regex);
+            if (sourceMatches) {
+              hasMatch = true;
+              cellMatches.source_matches = sourceMatches.length;
+              // Include source with context
+              cellMatches.source = source;
+            }
+          }
+
+          // Search in outputs (code cells only)
+          if ((search_in === "outputs" || search_in === "all") && type === "code") {
+            const outputs = cell instanceof Y.Map ? cell.get("outputs") : cell?.outputs;
+            if (outputs) {
+              const outputsJson = outputs instanceof Y.Array ? outputs.toJSON() : outputs;
+              const outputTexts: string[] = [];
+
+              for (const out of outputsJson) {
+                if (out.output_type === "stream") {
+                  outputTexts.push(out.text || "");
+                } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+                  const text = out.data?.["text/plain"];
+                  if (text) outputTexts.push(text);
+                } else if (out.output_type === "error") {
+                  outputTexts.push(`${out.ename}: ${out.evalue}`);
+                  if (out.traceback) {
+                    outputTexts.push(out.traceback.join("\n"));
+                  }
+                }
+              }
+
+              const combinedOutput = outputTexts.join("\n");
+              const outputMatches = combinedOutput.match(regex);
+              if (outputMatches) {
+                hasMatch = true;
+                cellMatches.output_matches = outputMatches.length;
+                cellMatches.output = combinedOutput;
+              }
+            }
+          }
+
+          if (hasMatch) {
+            matches.push(cellMatches);
+          }
+        }
+
+        const summary = `Search for "${pattern}" in ${path}: ${matches.length} cell(s) matched`;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: matches.length > 0
+                ? `${summary}\n\n${JSON.stringify(matches, null, 2)}`
+                : `${summary}`,
+            },
+          ],
+        };
       }
 
       default:

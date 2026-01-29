@@ -21,6 +21,7 @@ src/
 | `connect_jupyter` | Connect to JupyterLab with URL (call first!) |
 | `list_notebooks` | List open notebooks with active kernels |
 | `get_notebook_content` | Get cells with filtering (code only by default) |
+| `search_notebook` | Grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |
 | `update_cell` | Update cell source code |
 | `delete_cell` | Delete a cell |
@@ -35,10 +36,27 @@ src/
 ```
 cell_type: "code" (default), "markdown", or "all"
 include_outputs: false (default) - set true only when needed
+output_format: "text" (default) or "structured"
 start_index / end_index: read specific cell ranges
 ```
 
+**Output formats**:
+- `text` (default): Returns outputs as a single `output` string (just text/plain content)
+- `structured`: Returns `outputs` array with metadata (output_type, has_image, has_html)
+
 **Best practice**: The default `cell_type="code"` skips markdown cells, keeping context focused on executable code.
+
+### Searching
+
+`search_notebook` greps through notebook content:
+
+```
+pattern: regex or string to search for
+search_in: "source", "outputs", or "all" (default)
+case_sensitive: false (default)
+```
+
+Returns matching cells with their source and/or output text. Useful for finding errors, tracebacks, or specific values.
 
 ## Claude Code Configuration
 
