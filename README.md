@@ -2,6 +2,8 @@
 
 An MCP server that connects Claude Code to JupyterLab notebooks in real-time. Changes sync bidirectionally with the browser.
 
+> **Note**: See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) - a similar project with more features. This project offers simpler setup, `search_notebook`, and cursor awareness. See [Related Projects](#related-projects) for details.
+
 ## Features
 
 - **Real-time sync**: See changes appear instantly in JupyterLab
