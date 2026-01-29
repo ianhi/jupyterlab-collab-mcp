@@ -26,6 +26,7 @@ src/
 | `get_notebook_content` | Get cells with filtering (code only by default) |
 | `search_notebook` | Grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |
+| `insert_and_execute` | Insert a cell and run it in one operation |
 | `update_cell` | Update cell source code |
 | `update_and_execute` | Update a cell and run it in one operation |
 | `delete_cell` | Delete a cell |

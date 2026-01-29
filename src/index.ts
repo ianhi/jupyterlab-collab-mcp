@@ -709,6 +709,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "insert_and_execute",
+        description:
+          "Insert a new code cell and immediately execute it. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Position to insert (0 = beginning, -1 or omit = end)",
+            },
+            source: {
+              type: "string",
+              description: "Code to insert and execute",
+            },
+          },
+          required: ["path", "source"],
+        },
+      },
+      {
         name: "update_and_execute",
         description:
           "Update a cell's source code and immediately execute it. Combines update_cell + execute_cell in one operation. Returns the execution output.",
@@ -1320,6 +1343,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           return { content };
         }
+      }
+
+      case "insert_and_execute": {
+        const { path, index, source } = args as {
+          path: string;
+          index?: number;
+          source: string;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          throw new Error(
+            `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
+          );
+        }
+
+        const { doc } = await connectToNotebook(path, session.kernelId);
+        const cells = doc.getArray("cells");
+
+        // Create cell as Y.Map with Y.Text for source
+        const newCell = new Y.Map();
+        newCell.set("cell_type", "code");
+        newCell.set("source", new Y.Text(source));
+        newCell.set("metadata", new Y.Map());
+        newCell.set("outputs", new Y.Array());
+        newCell.set("execution_count", null);
+        newCell.set("id", crypto.randomUUID());
+
+        const insertIndex = index === undefined || index === -1 ? cells.length : index;
+        cells.insert(insertIndex, [newCell]);
+
+        // Execute the cell
+        const result = await executeCode(session.kernelId, source);
+
+        // Update cell outputs in the notebook
+        updateCellOutputs(newCell, result);
+
+        // Build response
+        const content: any[] = [
+          {
+            type: "text",
+            text: `Inserted and executed cell at index ${insertIndex} in ${path}\n\nOutput:\n${result.text || "(no output)"}`,
+          },
+        ];
+
+        // Add images
+        for (const img of result.images) {
+          content.push({
+            type: "image",
+            data: img.data,
+            mimeType: img.mimeType,
+          });
+        }
+
+        return { content };
       }
 
       case "update_and_execute": {
