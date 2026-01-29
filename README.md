@@ -28,7 +28,7 @@ pip install jupyter-collaboration
 git clone https://github.com/ianhi/jupyterlab-claude-code.git
 cd jupyterlab-claude-code
 npm install && npm run build
-claude mcp add jupyter -- node /path/to/jupyterlab-claude-code/dist/index.js
+claude mcp add jupyter -- node $PWD/dist/index.js
 ```
 
 No token in config - just paste your JupyterLab URL when connecting.
