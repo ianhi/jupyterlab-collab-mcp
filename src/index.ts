@@ -986,10 +986,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
-        const { provider } = await connectToNotebook(path, session?.kernelId);
+        const { doc, provider } = await connectToNotebook(path, session?.kernelId);
         const awareness = provider.awareness;
+        const cells = doc.getArray("cells");
 
-        // Get all awareness states (including our own and the user's)
+        // Build a map of Y.Text ID to cell index
+        const ytextToCellIndex = new Map<any, number>();
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          if (cell instanceof Y.Map) {
+            const source = cell.get("source");
+            if (source instanceof Y.Text) {
+              // Use the Y.Text's internal ID/reference
+              ytextToCellIndex.set(source, i);
+            }
+          }
+        }
+
+        // Get all awareness states
         const states = awareness.getStates();
         const myClientId = awareness.clientID;
 
@@ -1002,12 +1016,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             user: state.user?.display_name || state.user?.name || "Unknown",
           };
 
-          // Check for cursor info
+          // Try to find which cell the cursor is in
           if (state.cursors && state.cursors.length > 0) {
-            info.cursors = state.cursors.map((c: any) => ({
-              head: c.head,
-              anchor: c.anchor,
-            }));
+            for (const cursor of state.cursors) {
+              // The RelativePosition contains a reference to the Y.Text type
+              // Try to resolve it to find the cell
+              if (cursor.head && cursor.head.type) {
+                // cursor.head.type is the ID of the Y.Text
+                // We need to find which cell's source matches this
+                for (let i = 0; i < cells.length; i++) {
+                  const cell = cells.get(i) as Y.Map<any>;
+                  if (cell instanceof Y.Map) {
+                    const source = cell.get("source");
+                    if (source instanceof Y.Text) {
+                      try {
+                        // Try to create absolute position - if it works, this is the right cell
+                        const absPos = Y.createAbsolutePositionFromRelativePosition(
+                          cursor.head,
+                          doc
+                        );
+                        if (absPos && absPos.type === source) {
+                          info.focusedCell = i;
+                          info.cursorPosition = absPos.index;
+                          break;
+                        }
+                      } catch {
+                        // Not this cell
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
 
           // Check for current document
