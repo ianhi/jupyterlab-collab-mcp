@@ -548,7 +548,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_notebook_content",
         description:
-          "Get cells from a notebook. By default returns only source code (no outputs) to save context. Use include_outputs=true only when you need to see execution results. Use cell_type='code' to skip markdown cells.",
+          "Get cells from a notebook. RECOMMENDED: Use cell_type='code' to get only code cells (skips markdown). Outputs are excluded by default to save context - only set include_outputs=true when debugging execution results.",
         inputSchema: {
           type: "object",
           properties: {
@@ -559,11 +559,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             cell_type: {
               type: "string",
               enum: ["all", "code", "markdown"],
-              description: "Filter by cell type. Use 'code' for quick context without markdown prose. Default: 'all'",
+              description: "Filter by cell type. Use 'code' for quick context without markdown prose (Recommended). Default: 'all'",
             },
             include_outputs: {
               type: "boolean",
-              description: "Include cell outputs (stdout, results, images). WARNING: Can be very large with rich outputs like plots/dataframes. Default: false",
+              description: "Include cell outputs. WARNING: Can be very large with rich outputs like plots/dataframes. Only use when specifically asked about outputs. Default: false",
             },
             start_index: {
               type: "number",
