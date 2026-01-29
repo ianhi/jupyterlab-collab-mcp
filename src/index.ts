@@ -151,11 +151,16 @@ async function connectToNotebook(
     },
   });
 
-  // Set awareness
+  // Set awareness with all required fields for JupyterLab collaborators panel
   provider.awareness.setLocalStateField("user", {
+    username: "claude-code",
     name: "Claude Code",
+    display_name: "Claude Code",
+    initials: "CC",
     color: "#ff6b6b",
   });
+  // Set current document
+  provider.awareness.setLocalStateField("current", `json:notebook:${session.fileId}`);
 
   // Wait for sync
   await new Promise<void>((resolve, reject) => {
