@@ -23,29 +23,13 @@ pip install jupyter-collaboration
 ## Installation
 
 ```bash
-claude mcp add jupyter -- npx jupyterlab-claude-code
+git clone https://github.com/ianhi/jupyterlab-claude-code.git
+cd jupyterlab-claude-code
+npm install && npm run build
+claude mcp add jupyter -- node /path/to/jupyterlab-claude-code/dist/index.js
 ```
 
-That's it! No cloning or manual config needed.
-
-<details>
-<summary>Alternative: Manual configuration</summary>
-
-Add to `.mcp.json` in project root or `~/.claude.json`:
-
-```json
-{
-  "mcpServers": {
-    "jupyter": {
-      "command": "npx",
-      "args": ["jupyterlab-claude-code"]
-    }
-  }
-}
-```
-</details>
-
-No token in config needed - just paste your JupyterLab URL when connecting.
+No token in config - just paste your JupyterLab URL when connecting.
 
 ## Usage
 

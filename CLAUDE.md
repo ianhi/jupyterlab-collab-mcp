@@ -61,7 +61,10 @@ Returns matching cells with their source and/or output text. Useful for finding 
 ## Installation
 
 ```bash
-claude mcp add jupyter -- npx jupyterlab-claude-code
+git clone https://github.com/ianhi/jupyterlab-claude-code.git
+cd jupyterlab-claude-code
+npm install && npm run build
+claude mcp add jupyter -- node /path/to/jupyterlab-claude-code/dist/index.js
 ```
 
 No token in config - just paste your JupyterLab URL when connecting:
