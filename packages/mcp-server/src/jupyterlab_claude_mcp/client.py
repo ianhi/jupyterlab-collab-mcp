@@ -15,6 +15,7 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import websockets
@@ -29,6 +30,110 @@ if TYPE_CHECKING:
     from websockets.asyncio.client import ClientConnection
 
 logger = logging.getLogger(__name__)
+
+# Directory where JupyterLab writes connection files
+CONNECTION_DIR = Path.home() / ".jupyter" / "claude-code-connections"
+
+
+def discover_instances() -> list[dict[str, Any]]:
+    """Discover available JupyterLab instances.
+
+    Reads connection files from ~/.jupyter/claude-code-connections/
+    and returns info about running instances.
+
+    Returns:
+        List of connection info dicts, each containing:
+        - instance_id: Short unique ID for the instance
+        - port: Server port
+        - token: Auth token
+        - ws_url: WebSocket URL
+        - pid: Process ID
+    """
+    instances = []
+
+    if not CONNECTION_DIR.exists():
+        return instances
+
+    for conn_file in CONNECTION_DIR.glob("*.json"):
+        try:
+            data = json.loads(conn_file.read_text())
+
+            # Check if the process is still running
+            pid = data.get("pid")
+            if pid and not _is_process_running(pid):
+                # Clean up stale connection file
+                conn_file.unlink()
+                continue
+
+            instances.append(data)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Error reading connection file {conn_file}: {e}")
+
+    return instances
+
+
+def _is_process_running(pid: int) -> bool:
+    """Check if a process with the given PID is running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
+def get_default_instance() -> dict[str, Any] | None:
+    """Get the default JupyterLab instance to connect to.
+
+    If JUPYTER_INSTANCE_ID env var is set, returns that instance.
+    If only one instance is running, returns it.
+    Otherwise returns None (user must specify).
+
+    Returns:
+        Connection info dict or None if no default can be determined.
+    """
+    # Check for explicit instance ID
+    instance_id = os.environ.get("JUPYTER_INSTANCE_ID")
+    if instance_id:
+        return get_instance_by_id(instance_id)
+
+    instances = discover_instances()
+
+    if len(instances) == 1:
+        return instances[0]
+    elif len(instances) == 0:
+        return None
+    else:
+        # Multiple instances - check env vars for port hint
+        port = os.environ.get("JUPYTER_PORT")
+        if port:
+            for inst in instances:
+                if str(inst.get("port")) == port:
+                    return inst
+
+        # Can't determine default
+        logger.warning(
+            f"Multiple JupyterLab instances found: {[i['instance_id'] for i in instances]}. "
+            "Set JUPYTER_INSTANCE_ID to specify which one to connect to."
+        )
+        return None
+
+
+def get_instance_by_id(instance_id: str) -> dict[str, Any] | None:
+    """Get connection info for a specific instance by ID.
+
+    Args:
+        instance_id: The instance ID to look up.
+
+    Returns:
+        Connection info dict or None if not found.
+    """
+    conn_file = CONNECTION_DIR / f"{instance_id}.json"
+    if conn_file.exists():
+        try:
+            return json.loads(conn_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
 
 
 class ConnectionState(Enum):
@@ -153,27 +258,56 @@ class JupyterLabClient:
         port: int | None = None,
         path: str | None = None,
         token: str | None = None,
+        instance_id: str | None = None,
         use_ssl: bool = False,
         timeout: float = DEFAULT_TIMEOUT,
         auto_reconnect: bool = True,
     ):
         """Initialize the JupyterLab WebSocket client.
 
+        Connection can be specified in three ways (in order of priority):
+        1. Explicit parameters (host, port, token)
+        2. Instance ID (looks up from discovery)
+        3. Auto-discovery (finds running JupyterLab instances)
+
         Args:
             host: JupyterLab server hostname. Defaults to localhost.
             port: JupyterLab server port. Defaults to 8888.
             path: WebSocket endpoint path. Defaults to /claude-code/ws.
-            token: Jupyter authentication token. If not provided, reads from
-                   JUPYTER_TOKEN environment variable.
+            token: Jupyter authentication token.
+            instance_id: Connect to a specific instance by ID.
             use_ssl: Whether to use wss:// instead of ws://. Defaults to False.
             timeout: Default timeout for requests in seconds. Defaults to 30.0.
             auto_reconnect: Whether to automatically reconnect on connection loss.
                            Defaults to True.
         """
-        self.host = host or os.environ.get("JUPYTER_HOST", self.DEFAULT_HOST)
-        self.port = port or int(os.environ.get("JUPYTER_PORT", str(self.DEFAULT_PORT)))
-        self.path = path or os.environ.get("JUPYTER_WS_PATH", self.DEFAULT_PATH)
-        self.token = token or os.environ.get("JUPYTER_TOKEN")
+        self.instance_id = instance_id
+
+        # Try to auto-discover connection info if not explicitly provided
+        discovered = None
+        if not (host or port or token):
+            discovered = get_instance_by_id(instance_id) if instance_id else get_default_instance()
+
+            if discovered:
+                logger.info(
+                    f"Auto-discovered JupyterLab instance: {discovered.get('instance_id')} "
+                    f"on port {discovered.get('port')}"
+                )
+
+        # Use discovered values as defaults
+        if discovered:
+            self.host = host or self.DEFAULT_HOST
+            self.port = port or discovered.get("port", self.DEFAULT_PORT)
+            self.path = path or discovered.get("base_url", "") + "claude-code/ws"
+            self.token = token or discovered.get("token")
+            self.instance_id = discovered.get("instance_id")
+        else:
+            # Fall back to env vars / defaults
+            self.host = host or os.environ.get("JUPYTER_HOST", self.DEFAULT_HOST)
+            self.port = port or int(os.environ.get("JUPYTER_PORT", str(self.DEFAULT_PORT)))
+            self.path = path or os.environ.get("JUPYTER_WS_PATH", self.DEFAULT_PATH)
+            self.token = token or os.environ.get("JUPYTER_TOKEN")
+
         self.use_ssl = use_ssl
         self.timeout = timeout
         self.auto_reconnect = auto_reconnect

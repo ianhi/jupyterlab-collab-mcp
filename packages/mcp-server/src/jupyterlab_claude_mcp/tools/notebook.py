@@ -20,6 +20,37 @@ def register_notebook_tools(mcp_server: Server, client: JupyterLabClient) -> Non
         mcp_server: The MCP server instance to register tools with.
         client: The WebSocket client for communicating with JupyterLab.
     """
+    # Import here to avoid circular imports
+    from jupyterlab_claude_mcp.client import discover_instances
+
+    @mcp_server.call_tool()
+    async def list_jupyterlab_instances() -> list[dict[str, Any]]:
+        """List all running JupyterLab instances that Claude can connect to.
+
+        This discovers JupyterLab servers that have the Claude Code extension
+        installed and are currently running. Use this to see available instances
+        before connecting.
+
+        Returns:
+            List of instance info dictionaries, each containing:
+            - instance_id: Short ID to identify this instance
+            - port: The port JupyterLab is running on
+            - pid: Process ID of the JupyterLab server
+
+        If no instances are found, returns an empty list. The user may need to:
+        1. Start JupyterLab with: jupyter lab
+        2. Ensure jupyterlab-claude-code extension is installed
+        """
+        instances = discover_instances()
+        # Remove token from response for security (don't expose in logs/output)
+        return [
+            {
+                "instance_id": inst.get("instance_id"),
+                "port": inst.get("port"),
+                "pid": inst.get("pid"),
+            }
+            for inst in instances
+        ]
 
     @mcp_server.call_tool()
     async def list_notebooks() -> list[dict[str, Any]]:
