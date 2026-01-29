@@ -1,5 +1,0 @@
-{
-  "packageManager": "python",
-  "packageName": "jupyterlab-claude-code",
-  "uninstallInstructions": "Use `pip uninstall jupyterlab-claude-code` to uninstall this extension."
-}

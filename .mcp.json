@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jupyter": {
+      "command": "npx",
+      "args": ["tsx", "/Users/ian/Documents/dev/jupyterlab-claude-code/src/index.ts"]
+    }
+  }
+}

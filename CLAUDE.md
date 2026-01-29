@@ -2,70 +2,98 @@
 
 ## Project Overview
 
-This monorepo contains an MCP server and JupyterLab extension that enables Claude Code to interact with JupyterLab notebooks in real-time.
+A TypeScript MCP server that connects to JupyterLab's real-time collaboration system, allowing Claude Code to read and edit notebooks in real-time.
 
-## Structure
+## Architecture
+
+**Key insight**: No custom JupyterLab extension is needed. We use `y-websocket` to connect directly to the existing `jupyter-collaboration` endpoints.
 
 ```
-packages/
-├── mcp-server/          # MCP Server (Python) - connects to Claude Code via stdio
-└── labextension/        # JupyterLab Extension (Python server + TypeScript frontend)
+src/
+├── index.ts    # MCP server (stdio transport)
+└── test.ts     # Standalone test script
 ```
+
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `connect_jupyter` | Connect to JupyterLab with URL (call first!) |
+| `list_notebooks` | List open notebooks with active kernels |
+| `get_notebook_content` | Get all cells (index, type, source) |
+| `insert_cell` | Insert a new cell at position |
+| `update_cell` | Update cell source code |
+| `delete_cell` | Delete a cell |
+| `execute_cell` | Execute a cell, show outputs in JupyterLab |
+| `execute_code` | Execute code (optionally as new cell with outputs) |
+
+## Claude Code Configuration
+
+Add to `~/.claude/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "jupyter": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/jupyterlab-claude-code/src/index.ts"]
+    }
+  }
+}
+```
+
+No token needed in config! Just paste your JupyterLab URL to Claude:
+> "Connect to http://localhost:8888/lab?token=abc123"
 
 ## Key Technologies
 
-- **Python**: uv for package management, FastMCP for MCP server
-- **TypeScript**: JupyterLab 4.x extension API
-- **Real-time sync**: Yjs CRDT via jupyter-collaboration
-- **Communication**: WebSocket between MCP server and JupyterLab server extension
+- **TypeScript** with `tsx` for development
+- **@modelcontextprotocol/sdk** for MCP server
+- **y-websocket** for Yjs sync (same as JupyterLab frontend)
+- **yjs** for CRDT data structures
 
-## Development Commands
+## Development
 
 ```bash
 # Install dependencies
-uv sync
 npm install
 
-# Build frontend
+# Test RTC connection (rapid iteration, no Claude Code restart needed)
+JUPYTER_TOKEN=xxx npx tsx src/test.ts
+
+# Build MCP server
 npm run build
 
-# Watch mode for frontend development
+# Watch mode
 npm run watch
-
-# Run MCP server directly
-uv run jupyterlab-claude-mcp
-
-# Install extension in development mode
-uv run jupyter labextension develop packages/labextension --overwrite
 ```
 
-## Testing
+## JupyterLab API Endpoints
 
-```bash
-# Start JupyterLab
-jupyter lab --port=8888
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/sessions` | GET | List open notebooks |
+| `/api/collaboration/session/{path}` | PUT | Request document session |
+| `/api/collaboration/room/{room_id}` | WS | Yjs sync WebSocket |
+| `/api/kernels/{id}/channels` | WS | Kernel execution |
 
-# In another terminal, test MCP server
-uv run jupyterlab-claude-mcp
-```
+## Connection Flow
 
-## Architecture Notes
-
-1. **MCP Server** (`packages/mcp-server`):
-   - Runs as stdio process spawned by Claude Code
-   - Connects to JupyterLab via WebSocket
-   - Exposes MCP tools for notebook manipulation
-
-2. **JupyterLab Extension** (`packages/labextension`):
-   - Server extension: WebSocket endpoint, Yjs bridge, kernel proxy
-   - Frontend extension: Connection status UI
-
-3. **Real-time Collaboration**:
-   - Uses jupyter-collaboration's Yjs infrastructure
-   - Changes made via MCP appear instantly in user's notebook
-   - No manual save/revert needed
+1. `GET /api/sessions` → Find notebook path
+2. `PUT /api/collaboration/session/{path}` → Get `fileId` and `sessionId`
+3. Connect WebSocket to `/api/collaboration/room/json:notebook:{fileId}?sessionId=...`
+4. Wait for y-websocket `sync` event
+5. Access `doc.getArray("cells")` for notebook content
 
 ## Environment Variables
 
-- `JUPYTER_URL`: JupyterLab server URL (default: http://localhost:8888)
-- `JUPYTER_TOKEN`: Authentication token for JupyterLab
+- `JUPYTER_HOST` - Hostname (default: localhost)
+- `JUPYTER_PORT` - Port (default: 8888)
+- `JUPYTER_TOKEN` - Auth token (required)
+
+## Important Notes
+
+- Always request a session before connecting to the room
+- The `sessionId` must be passed as a query parameter
+- Room ID format: `{format}:{type}:{fileId}` (e.g., `json:notebook:abc-123`)
+- Cells are in `doc.getArray("cells")` as Y.Map objects
