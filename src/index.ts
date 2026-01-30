@@ -579,6 +579,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "batch_update_cells",
+        description:
+          "Update multiple cells at once. More efficient than calling update_cell repeatedly. Each update specifies index and new source. All changes are applied atomically.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            updates: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  index: { type: "number", description: "Cell index to update" },
+                  source: { type: "string", description: "New source code" },
+                },
+                required: ["index", "source"],
+              },
+              description: "Array of {index, source} updates to apply",
+            },
+          },
+          required: ["path", "updates"],
+        },
+      },
+      {
         name: "delete_cell",
         description: "Delete a cell from the notebook. Changes sync in real-time to JupyterLab browser. Returns a diff showing what was deleted.",
         inputSchema: {
@@ -837,6 +864,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_cell_outputs",
+        description:
+          "Get execution outputs from specific cells without fetching source code. Useful for checking results without re-fetching everything. Returns text and image outputs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
+            },
+            end_index: {
+              type: "number",
+              description: "Last cell index (inclusive). Omit for single cell.",
+            },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "get_cell_metadata",
         description:
           "Get metadata from one or more cells. Returns {index, metadata, tags} - tags extracted to top level for convenience. Use indices:[2,5,8] for non-contiguous cells.",
@@ -957,6 +1012,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "array",
               items: { type: "string" },
               description: "Tags to remove",
+            },
+          },
+          required: ["path", "tags"],
+        },
+      },
+      {
+        name: "find_cells_by_tag",
+        description:
+          "Find cells that have specific tag(s). Returns cell indices and their tags. Useful for locating cells marked with 'hide-input', 'parameters', etc.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            tags: {
+              type: "array",
+              items: { type: "string" },
+              description: "Tags to search for (cells matching ANY of these tags are returned)",
+            },
+            match_all: {
+              type: "boolean",
+              description: "If true, only return cells that have ALL specified tags. Default: false (match any)",
             },
           },
           required: ["path", "tags"],
@@ -1342,6 +1421,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Updated cell ${index} in ${path}\n\n\`\`\`diff\n${diff}\n\`\`\``,
+            },
+          ],
+        };
+      }
+
+      case "batch_update_cells": {
+        const { path, updates } = args as {
+          path: string;
+          updates: { index: number; source: string }[];
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        // Validate all indices first
+        for (const update of updates) {
+          if (update.index < 0 || update.index >= cells.length) {
+            throw new Error(
+              `Invalid cell index ${update.index}. Notebook has ${cells.length} cells.`
+            );
+          }
+        }
+
+        const diffs: string[] = [];
+
+        // Apply all updates in a transaction for atomicity
+        doc.transact(() => {
+          for (const update of updates) {
+            const cell = cells.get(update.index) as Y.Map<any>;
+            const oldSource = extractSource(cell);
+
+            if (cell instanceof Y.Map) {
+              const sourceField = cell.get("source");
+              if (sourceField instanceof Y.Text) {
+                sourceField.delete(0, sourceField.length);
+                sourceField.insert(0, update.source);
+              } else {
+                cell.set("source", new Y.Text(update.source));
+              }
+            }
+
+            const diff = generateUnifiedDiff(
+              oldSource,
+              update.source,
+              `${path}:cell[${update.index}]`
+            );
+            if (diff !== "(no changes)") {
+              diffs.push(`Cell ${update.index}:\n${diff}`);
+            }
+          }
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Updated ${updates.length} cells in ${path}\n\n\`\`\`diff\n${diffs.join("\n\n")}\n\`\`\``,
             },
           ],
         };
@@ -2404,6 +2543,96 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      case "get_cell_outputs": {
+        const { path, index, end_index, indices } = args as {
+          path: string;
+          index?: number;
+          end_index?: number;
+          indices?: number[];
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const { indices: cellIndices, description } = resolveCellIndices(cells.length, {
+          index,
+          end_index,
+          indices,
+        });
+
+        const results: any[] = [];
+        const images: { data: string; mimeType: string }[] = [];
+
+        for (const idx of cellIndices) {
+          const cell = cells.get(idx) as Y.Map<any>;
+          const type = getCellType(cell);
+
+          if (type !== "code") {
+            results.push({ index: idx, type, outputs: "(not a code cell)" });
+            continue;
+          }
+
+          const outputs = cell.get("outputs");
+          const executionCount = cell.get("execution_count");
+
+          if (!outputs || !(outputs instanceof Y.Array) || outputs.length === 0) {
+            results.push({ index: idx, type, execution_count: executionCount, outputs: [] });
+            continue;
+          }
+
+          const outputsJson = outputs.toJSON();
+          const textParts: string[] = [];
+
+          for (const out of outputsJson) {
+            if (out.output_type === "stream") {
+              textParts.push(out.text || "");
+            } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+              if (out.data?.["text/plain"]) {
+                textParts.push(out.data["text/plain"]);
+              }
+              // Collect images
+              if (out.data?.["image/png"]) {
+                images.push({ data: out.data["image/png"], mimeType: "image/png" });
+              }
+              if (out.data?.["image/jpeg"]) {
+                images.push({ data: out.data["image/jpeg"], mimeType: "image/jpeg" });
+              }
+            } else if (out.output_type === "error") {
+              textParts.push(`${out.ename}: ${out.evalue}`);
+            }
+          }
+
+          results.push({
+            index: idx,
+            type,
+            execution_count: executionCount,
+            text: textParts.join(""),
+            output_count: outputsJson.length,
+          });
+        }
+
+        const content: any[] = [
+          {
+            type: "text",
+            text: `Outputs from ${description} in ${path}:\n\n${JSON.stringify(results, null, 2)}`,
+          },
+        ];
+
+        // Include images if any
+        for (const img of images) {
+          content.push({
+            type: "image",
+            data: img.data,
+            mimeType: img.mimeType,
+          });
+        }
+
+        return { content };
+      }
+
       case "get_cell_metadata": {
         const { path, index, end_index, indices } = args as {
           path: string;
@@ -2609,6 +2838,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Removed tags [${tags.join(", ")}] from ${resolved.description}`,
+            },
+          ],
+        };
+      }
+
+      case "find_cells_by_tag": {
+        const { path, tags, match_all = false } = args as {
+          path: string;
+          tags: string[];
+          match_all?: boolean;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const matches: { index: number; type: string; tags: string[] }[] = [];
+
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          const type = getCellType(cell);
+          const cellMetadata = cell.get("metadata");
+
+          let cellTags: string[] = [];
+          if (cellMetadata instanceof Y.Map) {
+            const tagsValue = cellMetadata.get("tags");
+            if (tagsValue instanceof Y.Array) {
+              cellTags = tagsValue.toJSON() as string[];
+            } else if (Array.isArray(tagsValue)) {
+              cellTags = tagsValue;
+            }
+          }
+
+          if (cellTags.length === 0) continue;
+
+          const hasMatch = match_all
+            ? tags.every((t) => cellTags.includes(t))
+            : tags.some((t) => cellTags.includes(t));
+
+          if (hasMatch) {
+            matches.push({ index: i, type, tags: cellTags });
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}`,
             },
           ],
         };
