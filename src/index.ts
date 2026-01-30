@@ -1651,7 +1651,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Inserted ${cell_type} cell at index ${insertIndex} in ${path}\n\n\`\`\`diff\n${insertDiff}\n\`\`\``,
+              text: `Inserted ${cell_type} cell at index ${insertIndex} in ${path}\n\n${insertDiff}`,
             },
           ],
         };
@@ -1702,7 +1702,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Updated cell ${index} in ${path}\n\n\`\`\`diff\n${truncateDiff(diff)}\n\`\`\``,
+              text: `Updated cell ${index} in ${path}\n\n${truncateDiff(diff)}`,
             },
           ],
         };
@@ -1762,7 +1762,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Updated ${updates.length} cells in ${path}\n\n\`\`\`diff\n${diffs.join("\n\n")}\n\`\`\``,
+              text: `Updated ${updates.length} cells in ${path}\n\n${diffs.join("\n\n")}`,
             },
           ],
         };
@@ -1802,7 +1802,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Deleted ${cellType} cell at index ${index} in ${path}\n\n\`\`\`diff\n${deleteDiff}\n\`\`\``,
+              text: `Deleted ${cellType} cell at index ${index} in ${path}\n\n${deleteDiff}`,
             },
           ],
         };
@@ -2138,7 +2138,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const content: any[] = [
           {
             type: "text",
-            text: `Updated and executed cell ${index} in ${path}\n\n\`\`\`diff\n${truncateDiff(diff)}\n\`\`\`\n\nOutput:\n${result.text || "(no output)"}`,
+            text: `Updated and executed cell ${index} in ${path}\n\n${truncateDiff(diff)}\n\nOutput:\n${result.text || "(no output)"}`,
           },
         ];
 
