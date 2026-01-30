@@ -579,12 +579,68 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "list_files",
+        description:
+          "List files and directories in the Jupyter file system. Use to discover available notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Directory path to list. Default: '' (root)",
+            },
+          },
+        },
+      },
+      {
         name: "list_notebooks",
         description:
           "List notebooks with active kernel sessions. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel. Returns paths and kernel IDs.",
         inputSchema: {
           type: "object",
           properties: {},
+        },
+      },
+      {
+        name: "open_notebook",
+        description:
+          "Open a notebook and start a kernel session. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path (e.g., 'analysis.ipynb' or 'projects/notebook.ipynb')",
+            },
+            kernel_name: {
+              type: "string",
+              description: "Kernel to use (e.g., 'python3'). Default: notebook's default kernel",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "create_notebook",
+        description:
+          "Create a new notebook file. Optionally open it immediately with a kernel.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Path for new notebook (e.g., 'new_analysis.ipynb')",
+            },
+            kernel_name: {
+              type: "string",
+              description: "Kernel to use (e.g., 'python3'). Default: 'python3'",
+            },
+            open: {
+              type: "boolean",
+              description: "Open the notebook after creation. Default: true",
+            },
+          },
+          required: ["path"],
         },
       },
       {
@@ -619,6 +675,64 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             end_index: {
               type: "number",
               description: "End at this cell index (inclusive). Default: last cell",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "get_notebook_outline",
+        description:
+          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for navigating large notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "search_notebook",
+        description:
+          "Search/grep through notebook cells for a pattern (regex supported). Returns matching cells with source code and/or outputs. Useful for finding errors, tracebacks, variable usage, or specific text.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            pattern: {
+              type: "string",
+              description: "Search pattern (regex supported)",
+            },
+            search_in: {
+              type: "string",
+              enum: ["source", "outputs", "all"],
+              description: "Where to search: 'source' (code), 'outputs', or 'all' (default)",
+            },
+            case_sensitive: {
+              type: "boolean",
+              description: "Case-sensitive search. Default: false",
+            },
+          },
+          required: ["path", "pattern"],
+        },
+      },
+      {
+        name: "get_user_focus",
+        description:
+          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
             },
           },
           required: ["path"],
@@ -694,194 +808,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "get_user_focus",
-        description:
-          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path",
-            },
-          },
-          required: ["path"],
-        },
-      },
-      {
-        name: "execute_cell",
-        description:
-          "Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are returned here. Supports text output and images.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path",
-            },
-            index: {
-              type: "number",
-              description: "Cell index to execute",
-            },
-          },
-          required: ["path", "index"],
-        },
-      },
-      {
-        name: "execute_code",
-        description:
-          "Execute code in the notebook's kernel without modifying the notebook. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path (to identify which kernel to use)",
-            },
-            code: {
-              type: "string",
-              description: "Code to execute (language depends on notebook's kernel)",
-            },
-            insertCell: {
-              type: "boolean",
-              description:
-                "If true, insert code as a new cell and show outputs in JupyterLab (default: false)",
-            },
-          },
-          required: ["path", "code"],
-        },
-      },
-      {
-        name: "insert_and_execute",
-        description:
-          "Insert a new code cell and immediately execute it. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path",
-            },
-            index: {
-              type: "number",
-              description: "Position to insert (0 = beginning, -1 or omit = end)",
-            },
-            source: {
-              type: "string",
-              description: "Code to insert and execute",
-            },
-          },
-          required: ["path", "source"],
-        },
-      },
-      {
-        name: "update_and_execute",
-        description:
-          "Update a cell's source code and immediately execute it. Combines update_cell + execute_cell in one operation. Returns the execution output.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path",
-            },
-            index: {
-              type: "number",
-              description: "Cell index to update and execute",
-            },
-            source: {
-              type: "string",
-              description: "New source code for the cell",
-            },
-          },
-          required: ["path", "index", "source"],
-        },
-      },
-      {
-        name: "search_notebook",
-        description:
-          "Search/grep through notebook cells for a pattern (regex supported). Returns matching cells with source code and/or outputs. Useful for finding errors, tracebacks, variable usage, or specific text.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path",
-            },
-            pattern: {
-              type: "string",
-              description: "Search pattern (regex supported)",
-            },
-            search_in: {
-              type: "string",
-              enum: ["source", "outputs", "all"],
-              description: "Where to search: 'source' (code), 'outputs', or 'all' (default)",
-            },
-            case_sensitive: {
-              type: "boolean",
-              description: "Case-sensitive search. Default: false",
-            },
-          },
-          required: ["path", "pattern"],
-        },
-      },
-      {
-        name: "list_files",
-        description:
-          "List files and directories in the Jupyter file system. Use to discover available notebooks.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Directory path to list. Default: '' (root)",
-            },
-          },
-        },
-      },
-      {
-        name: "open_notebook",
-        description:
-          "Open a notebook and start a kernel session. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Notebook path (e.g., 'analysis.ipynb' or 'projects/notebook.ipynb')",
-            },
-            kernel_name: {
-              type: "string",
-              description: "Kernel to use (e.g., 'python3'). Default: notebook's default kernel",
-            },
-          },
-          required: ["path"],
-        },
-      },
-      {
-        name: "create_notebook",
-        description:
-          "Create a new notebook file. Optionally open it immediately with a kernel.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Path for new notebook (e.g., 'new_analysis.ipynb')",
-            },
-            kernel_name: {
-              type: "string",
-              description: "Kernel to use (e.g., 'python3'). Default: 'python3'",
-            },
-            open: {
-              type: "boolean",
-              description: "Open the notebook after creation. Default: true",
-            },
-          },
-          required: ["path"],
-        },
-      },
-      {
         name: "delete_cells",
         description:
           "Delete multiple cells at once. More efficient than calling delete_cell repeatedly.",
@@ -902,6 +828,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path", "start_index", "end_index"],
+        },
+      },
+      {
+        name: "change_cell_type",
+        description:
+          "Change a cell's type (code <-> markdown) in place, preserving content.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index to change",
+            },
+            new_type: {
+              type: "string",
+              enum: ["code", "markdown"],
+              description: "New cell type",
+            },
+          },
+          required: ["path", "index", "new_type"],
         },
       },
       {
@@ -967,9 +917,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "change_cell_type",
+        name: "execute_cell",
         description:
-          "Change a cell's type (code <-> markdown) in place, preserving content.",
+          "Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are returned here. Supports text output and images.",
         inputSchema: {
           type: "object",
           properties: {
@@ -979,30 +929,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             index: {
               type: "number",
-              description: "Cell index to change",
-            },
-            new_type: {
-              type: "string",
-              enum: ["code", "markdown"],
-              description: "New cell type",
+              description: "Cell index to execute",
             },
           },
-          required: ["path", "index", "new_type"],
+          required: ["path", "index"],
         },
       },
       {
-        name: "get_notebook_outline",
+        name: "execute_code",
         description:
-          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for navigating large notebooks.",
+          "Execute code in the notebook's kernel without modifying the notebook. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
         inputSchema: {
           type: "object",
           properties: {
             path: {
               type: "string",
-              description: "Notebook path",
+              description: "Notebook path (to identify which kernel to use)",
+            },
+            code: {
+              type: "string",
+              description: "Code to execute (language depends on notebook's kernel)",
+            },
+            insertCell: {
+              type: "boolean",
+              description:
+                "If true, insert code as a new cell and show outputs in JupyterLab (default: false)",
             },
           },
-          required: ["path"],
+          required: ["path", "code"],
         },
       },
       {
@@ -1026,6 +980,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path"],
+        },
+      },
+      {
+        name: "insert_and_execute",
+        description:
+          "Insert a new code cell and immediately execute it. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Position to insert (0 = beginning, -1 or omit = end)",
+            },
+            source: {
+              type: "string",
+              description: "Code to insert and execute",
+            },
+          },
+          required: ["path", "source"],
+        },
+      },
+      {
+        name: "update_and_execute",
+        description:
+          "Update a cell's source code and immediately execute it. Combines update_cell + execute_cell in one operation. Returns the execution output.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index to update and execute",
+            },
+            source: {
+              type: "string",
+              description: "New source code for the cell",
+            },
+          },
+          required: ["path", "index", "source"],
         },
       },
       {
@@ -1208,48 +1208,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: "rename_notebook",
-        description:
-          "Rename a notebook file. Disconnects any active collaboration session first.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path: {
-              type: "string",
-              description: "Current notebook path",
-            },
-            new_path: {
-              type: "string",
-              description: "New notebook path (must end in .ipynb)",
-            },
-          },
-          required: ["path", "new_path"],
-        },
-      },
-      {
-        name: "diff_notebooks",
-        description:
-          "Compare two notebooks cell by cell, showing differences in source code and cell types.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            path1: {
-              type: "string",
-              description: "First notebook path",
-            },
-            path2: {
-              type: "string",
-              description: "Second notebook path",
-            },
-            include_outputs: {
-              type: "boolean",
-              description: "Include output differences (default: false)",
-            },
-          },
-          required: ["path1", "path2"],
-        },
-      },
-      {
         name: "get_kernel_status",
         description:
           "Get the status of a notebook's kernel (idle, busy, starting, dead). Use to check if execution is complete or if kernel needs restart.",
@@ -1294,7 +1252,49 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path"],
         },
       },
-    ],
+      {
+        name: "rename_notebook",
+        description:
+          "Rename a notebook file. Disconnects any active collaboration session first.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Current notebook path",
+            },
+            new_path: {
+              type: "string",
+              description: "New notebook path (must end in .ipynb)",
+            },
+          },
+          required: ["path", "new_path"],
+        },
+      },
+      {
+        name: "diff_notebooks",
+        description:
+          "Compare two notebooks cell by cell, showing differences in source code and cell types.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path1: {
+              type: "string",
+              description: "First notebook path",
+            },
+            path2: {
+              type: "string",
+              description: "Second notebook path",
+            },
+            include_outputs: {
+              type: "boolean",
+              description: "Include output differences (default: false)",
+            },
+          },
+          required: ["path1", "path2"],
+        },
+      },
+    ]
   };
 });
 
