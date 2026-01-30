@@ -36,6 +36,8 @@ This command auto-detects your environment:
 - `jupyter-collaboration` - real-time sync for Claude Code
 - `jupyter-lsp` + `python-lsp-server` - diagnostics and hover info
 - `jupyterlab-vim` - vim keybindings
+- `jupyterlab-myst` - MyST markdown support
+- `jupyterlab-git` - git integration UI
 
 Requires [uv](https://docs.astral.sh/uv/) to be installed.
 

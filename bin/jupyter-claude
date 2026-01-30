@@ -29,6 +29,8 @@ EXTRAS=(
     jupyter-lsp
     python-lsp-server
     jupyterlab-vim
+    jupyterlab-myst
+    jupyterlab-git
 )
 
 # Build --with args
