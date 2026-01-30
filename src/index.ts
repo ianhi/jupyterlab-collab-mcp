@@ -565,7 +565,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "connect_jupyter",
         description:
-          "Connect to a JupyterLab server. MUST be called first before using any other jupyter tools. Provide the full URL including token. Example: http://localhost:8888/lab?token=abc123",
+          "Connect to a JupyterLab server. MUST be called first - other tools will error with 'Not connected to JupyterLab' until this succeeds. Provide the full URL with token (e.g., http://localhost:8888/lab?token=abc123).",
         inputSchema: {
           type: "object",
           properties: {
@@ -581,7 +581,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "list_notebooks",
         description:
-          "List all open notebooks in JupyterLab with active kernel sessions. Returns notebook paths and kernel IDs. Requires connect_jupyter first.",
+          "List notebooks with active kernel sessions. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel. Returns paths and kernel IDs.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -618,7 +618,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             end_index: {
               type: "number",
-              description: "End at this cell index (exclusive). Default: end of notebook",
+              description: "End at this cell index (inclusive). Default: last cell",
             },
           },
           required: ["path"],
@@ -696,7 +696,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_user_focus",
         description:
-          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns cursor positions and active cell index.",
+          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
         inputSchema: {
           type: "object",
           properties: {
@@ -730,7 +730,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_code",
         description:
-          "Execute arbitrary Python code in the notebook's kernel without modifying the notebook. Set insertCell=true to also add the code as a new cell with visible outputs in JupyterLab.",
+          "Execute code in the notebook's kernel without modifying the notebook. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
         inputSchema: {
           type: "object",
           properties: {
@@ -740,7 +740,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             code: {
               type: "string",
-              description: "Python code to execute",
+              description: "Code to execute (language depends on notebook's kernel)",
             },
             insertCell: {
               type: "boolean",
@@ -842,7 +842,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "open_notebook",
         description:
-          "Open a notebook in JupyterLab and start a kernel. The notebook will appear in the browser and be ready for editing/execution.",
+          "Open a notebook and start a kernel session. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1064,7 +1064,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             end_index: {
               type: "number",
-              description: "End of range (inclusive). Omit for single cell.",
+              description: "Last cell index (inclusive). Omit for single cell.",
             },
             indices: {
               type: "array",
@@ -1092,7 +1092,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             end_index: {
               type: "number",
-              description: "End of range (inclusive). Omit for single cell.",
+              description: "Last cell index (inclusive). Omit for single cell.",
             },
             indices: {
               type: "array",
@@ -1124,7 +1124,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             end_index: {
               type: "number",
-              description: "End of range (inclusive). Omit for single cell.",
+              description: "Last cell index (inclusive). Omit for single cell.",
             },
             indices: {
               type: "array",
@@ -1157,7 +1157,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             end_index: {
               type: "number",
-              description: "End of range (inclusive). Omit for single cell.",
+              description: "Last cell index (inclusive). Omit for single cell.",
             },
             indices: {
               type: "array",
@@ -1249,6 +1249,51 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path1", "path2"],
         },
       },
+      {
+        name: "get_kernel_status",
+        description:
+          "Get the status of a notebook's kernel (idle, busy, starting, dead). Use to check if execution is complete or if kernel needs restart.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "interrupt_kernel",
+        description:
+          "Interrupt (stop) a running execution. Use when code is taking too long or stuck in an infinite loop. Does not restart the kernel or clear state.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "restart_kernel",
+        description:
+          "Restart the kernel, clearing all variables and state. Use when kernel is unresponsive, memory is full, or you need a clean slate. All variables will be lost.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
     ],
   };
 });
@@ -1330,10 +1375,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? cells.length;
+        const endIdx = end_index ?? (cells.length - 1);
         const content = [];
 
-        for (let i = start_index; i < endIdx && i < cells.length; i++) {
+        for (let i = start_index; i <= endIdx && i < cells.length; i++) {
           const cell = cells.get(i) as any;
           const type = getCellType(cell);
 
@@ -2961,6 +3006,98 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: diffs.length === 0
                 ? `Notebooks ${path1} and ${path2} are identical`
                 : `Differences between ${path1} and ${path2}:\n\n${diffs.join("\n\n")}`,
+            },
+          ],
+        };
+      }
+
+      case "get_kernel_status": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
+              },
+            ],
+          };
+        }
+
+        const response = await apiFetch(`/api/kernels/${session.kernelId}`);
+        if (!response.ok) {
+          throw new Error(`Failed to get kernel status: ${response.statusText}`);
+        }
+
+        const kernel = await response.json();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Kernel status for ${path}:\n` +
+                `  Status: ${kernel.execution_state || "unknown"}\n` +
+                `  Name: ${kernel.name}\n` +
+                `  ID: ${kernel.id}`,
+            },
+          ],
+        };
+      }
+
+      case "interrupt_kernel": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          throw new Error(`No active kernel for ${path}. Nothing to interrupt.`);
+        }
+
+        const response = await apiFetch(`/api/kernels/${session.kernelId}/interrupt`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to interrupt kernel: ${response.statusText}`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Interrupted kernel for ${path}. Execution stopped but variables preserved.`,
+            },
+          ],
+        };
+      }
+
+      case "restart_kernel": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          throw new Error(`No active kernel for ${path}. Use open_notebook to start a kernel.`);
+        }
+
+        const response = await apiFetch(`/api/kernels/${session.kernelId}/restart`, {
+          method: "POST",
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to restart kernel: ${response.statusText}`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Restarted kernel for ${path}. All variables cleared. Kernel is ready for new execution.`,
             },
           ],
         };

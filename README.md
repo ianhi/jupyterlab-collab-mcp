@@ -74,6 +74,9 @@ No token in config - just paste your JupyterLab URL when connecting.
 | `set_notebook_metadata` | Set notebook-level metadata |
 | `rename_notebook` | Rename a notebook file |
 | `diff_notebooks` | Compare two notebooks cell by cell |
+| `get_kernel_status` | Check if kernel is idle/busy/dead |
+| `interrupt_kernel` | Stop running execution |
+| `restart_kernel` | Restart kernel (clears all state) |
 
 ### Non-Contiguous Cell Operations
 
