@@ -46,6 +46,15 @@ src/
 | `remove_cell_tags` | Remove tags from cell(s) |
 | `get_notebook_metadata` | Get notebook-level metadata |
 | `set_notebook_metadata` | Set notebook-level metadata |
+| `rename_notebook` | Rename a notebook file |
+| `diff_notebooks` | Compare two notebooks cell by cell |
+
+### Non-Contiguous Cell Operations
+
+Metadata/tag tools support `indices` array for non-contiguous cells:
+```
+add_cell_tags(path, indices=[2,4,6,8], tags=["hide-input"])
+```
 
 ### Context-Efficient Reading
 

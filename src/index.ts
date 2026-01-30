@@ -220,6 +220,49 @@ function getCellId(cell: any): string | undefined {
   return cell?.id;
 }
 
+/**
+ * Resolves cell indices from flexible parameters.
+ * - If indices array is provided, use it (non-contiguous)
+ * - Otherwise use index/end_index for range (contiguous)
+ * - Returns sorted unique indices and a description string
+ */
+function resolveCellIndices(
+  cellCount: number,
+  params: { index?: number; end_index?: number; indices?: number[] }
+): { indices: number[]; description: string } {
+  if (params.indices && params.indices.length > 0) {
+    // Non-contiguous indices specified
+    const indices = [...new Set(params.indices)].sort((a, b) => a - b);
+    for (const idx of indices) {
+      if (idx < 0 || idx >= cellCount) {
+        throw new Error(`Invalid cell index ${idx}. Notebook has ${cellCount} cells.`);
+      }
+    }
+    const description = indices.length === 1
+      ? `cell ${indices[0]}`
+      : `cells ${indices.join(", ")}`;
+    return { indices, description };
+  }
+
+  // Contiguous range via index/end_index
+  const index = params.index ?? 0;
+  const endIdx = params.end_index ?? index;
+
+  if (index < 0 || endIdx >= cellCount || index > endIdx) {
+    throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cellCount} cells.`);
+  }
+
+  const indices: number[] = [];
+  for (let i = index; i <= endIdx; i++) {
+    indices.push(i);
+  }
+
+  const description = indices.length === 1
+    ? `cell ${index}`
+    : `cells ${index}-${endIdx}`;
+  return { indices, description };
+}
+
 // ============================================================================
 // Kernel execution
 // ============================================================================
@@ -612,7 +655,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_cell",
-        description: "Update the source code of an existing cell. Changes sync in real-time to JupyterLab browser. Returns a diff showing what changed.",
+        description: "Update the source code of an existing cell. Only modifies source, not metadata/tags (use add_cell_tags/set_cell_metadata for those). Changes sync in real-time to JupyterLab.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1007,7 +1050,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_cell_metadata",
         description:
-          "Get metadata from one or more cells, including tags.",
+          "Get metadata from one or more cells, including tags. Supports ranges or specific non-contiguous indices.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1017,20 +1060,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             index: {
               type: "number",
-              description: "Cell index. If end_index also provided, this is start of range.",
+              description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
             },
             end_index: {
               type: "number",
               description: "End of range (inclusive). Omit for single cell.",
             },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
+            },
           },
-          required: ["path", "index"],
+          required: ["path"],
         },
       },
       {
         name: "set_cell_metadata",
         description:
-          "Set metadata on one or more cells. Merges with existing metadata (use null values to delete keys).",
+          "Set metadata on one or more cells. Merges with existing metadata (use null values to delete keys). Supports ranges or specific non-contiguous indices.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1040,24 +1088,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             index: {
               type: "number",
-              description: "Cell index. If end_index also provided, this is start of range.",
+              description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
             },
             end_index: {
               type: "number",
               description: "End of range (inclusive). Omit for single cell.",
+            },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
             },
             metadata: {
               type: "object",
               description: "Metadata to set/merge. Use null values to delete keys.",
             },
           },
-          required: ["path", "index", "metadata"],
+          required: ["path", "metadata"],
         },
       },
       {
         name: "add_cell_tags",
         description:
-          "Add tags to one or more cells. Common tags: 'skip-execution', 'hide-input', 'hide-output', 'parameters' (papermill).",
+          "Add tags to one or more cells. Common tags: 'skip-execution', 'hide-input', 'hide-output', 'parameters' (papermill). Supports ranges or specific non-contiguous indices.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1067,11 +1120,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             index: {
               type: "number",
-              description: "Cell index. If end_index also provided, this is start of range.",
+              description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
             },
             end_index: {
               type: "number",
               description: "End of range (inclusive). Omit for single cell.",
+            },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
             },
             tags: {
               type: "array",
@@ -1079,13 +1137,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Tags to add",
             },
           },
-          required: ["path", "index", "tags"],
+          required: ["path", "tags"],
         },
       },
       {
         name: "remove_cell_tags",
         description:
-          "Remove tags from one or more cells.",
+          "Remove tags from one or more cells. Supports ranges or specific non-contiguous indices.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1095,11 +1153,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             index: {
               type: "number",
-              description: "Cell index. If end_index also provided, this is start of range.",
+              description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
             },
             end_index: {
               type: "number",
               description: "End of range (inclusive). Omit for single cell.",
+            },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
             },
             tags: {
               type: "array",
@@ -1107,7 +1170,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Tags to remove",
             },
           },
-          required: ["path", "index", "tags"],
+          required: ["path", "tags"],
         },
       },
       {
@@ -1142,6 +1205,48 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path", "metadata"],
+        },
+      },
+      {
+        name: "rename_notebook",
+        description:
+          "Rename a notebook file. Disconnects any active collaboration session first.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Current notebook path",
+            },
+            new_path: {
+              type: "string",
+              description: "New notebook path (must end in .ipynb)",
+            },
+          },
+          required: ["path", "new_path"],
+        },
+      },
+      {
+        name: "diff_notebooks",
+        description:
+          "Compare two notebooks cell by cell, showing differences in source code and cell types.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path1: {
+              type: "string",
+              description: "First notebook path",
+            },
+            path2: {
+              type: "string",
+              description: "Second notebook path",
+            },
+            include_outputs: {
+              type: "boolean",
+              description: "Include output differences (default: false)",
+            },
+          },
+          required: ["path1", "path2"],
         },
       },
     ],
@@ -2469,10 +2574,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "get_cell_metadata": {
-        const { path, index, end_index } = args as {
+        const { path, index, end_index, indices } = args as {
           path: string;
-          index: number;
+          index?: number;
           end_index?: number;
+          indices?: number[];
         };
 
         const sessions = await listNotebookSessions();
@@ -2481,13 +2587,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? index;
-        if (index < 0 || endIdx >= cells.length || index > endIdx) {
-          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
-        }
+        const resolved = resolveCellIndices(cells.length, { index, end_index, indices });
 
         const results: any[] = [];
-        for (let i = index; i <= endIdx; i++) {
+        for (const i of resolved.indices) {
           const cell = cells.get(i) as Y.Map<any>;
           const metadata = cell.get("metadata");
           const metadataJson = metadata instanceof Y.Map ? metadata.toJSON() : (metadata || {});
@@ -2503,18 +2606,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: results.length === 1
-                ? `Cell ${index} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
-                : `Metadata for cells ${index}-${endIdx}:\n${JSON.stringify(results, null, 2)}`,
+                ? `Cell ${resolved.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
+                : `Metadata for ${resolved.description}:\n${JSON.stringify(results, null, 2)}`,
             },
           ],
         };
       }
 
       case "set_cell_metadata": {
-        const { path, index, end_index, metadata } = args as {
+        const { path, index, end_index, indices, metadata } = args as {
           path: string;
-          index: number;
+          index?: number;
           end_index?: number;
+          indices?: number[];
           metadata: Record<string, any>;
         };
 
@@ -2524,12 +2628,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? index;
-        if (index < 0 || endIdx >= cells.length || index > endIdx) {
-          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
-        }
+        const resolved = resolveCellIndices(cells.length, { index, end_index, indices });
 
-        for (let i = index; i <= endIdx; i++) {
+        for (const i of resolved.indices) {
           const cell = cells.get(i) as Y.Map<any>;
           let cellMetadata = cell.get("metadata");
 
@@ -2558,22 +2659,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
-        const count = endIdx - index + 1;
         return {
           content: [
             {
               type: "text",
-              text: `Updated metadata on ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+              text: `Updated metadata on ${resolved.description}`,
             },
           ],
         };
       }
 
       case "add_cell_tags": {
-        const { path, index, end_index, tags } = args as {
+        const { path, index, end_index, indices, tags } = args as {
           path: string;
-          index: number;
+          index?: number;
           end_index?: number;
+          indices?: number[];
           tags: string[];
         };
 
@@ -2583,12 +2684,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? index;
-        if (index < 0 || endIdx >= cells.length || index > endIdx) {
-          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
-        }
+        const resolved = resolveCellIndices(cells.length, { index, end_index, indices });
 
-        for (let i = index; i <= endIdx; i++) {
+        for (const i of resolved.indices) {
           const cell = cells.get(i) as Y.Map<any>;
           let cellMetadata = cell.get("metadata");
 
@@ -2622,22 +2720,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellMetadata.set("tags", newTagsArray);
         }
 
-        const count = endIdx - index + 1;
         return {
           content: [
             {
               type: "text",
-              text: `Added tags [${tags.join(", ")}] to ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+              text: `Added tags [${tags.join(", ")}] to ${resolved.description}`,
             },
           ],
         };
       }
 
       case "remove_cell_tags": {
-        const { path, index, end_index, tags } = args as {
+        const { path, index, end_index, indices, tags } = args as {
           path: string;
-          index: number;
+          index?: number;
           end_index?: number;
+          indices?: number[];
           tags: string[];
         };
 
@@ -2647,12 +2745,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? index;
-        if (index < 0 || endIdx >= cells.length || index > endIdx) {
-          throw new Error(`Invalid range [${index}, ${endIdx}]. Notebook has ${cells.length} cells.`);
-        }
+        const resolved = resolveCellIndices(cells.length, { index, end_index, indices });
 
-        for (let i = index; i <= endIdx; i++) {
+        for (const i of resolved.indices) {
           const cell = cells.get(i) as Y.Map<any>;
           const cellMetadata = cell.get("metadata");
 
@@ -2678,12 +2773,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellMetadata.set("tags", newTagsArray);
         }
 
-        const count = endIdx - index + 1;
         return {
           content: [
             {
               type: "text",
-              text: `Removed tags [${tags.join(", ")}] from ${count} cell(s) (${index}${endIdx !== index ? `-${endIdx}` : ""})`,
+              text: `Removed tags [${tags.join(", ")}] from ${resolved.description}`,
             },
           ],
         };
@@ -2753,6 +2847,120 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Updated notebook metadata for ${path}`,
+            },
+          ],
+        };
+      }
+
+      case "rename_notebook": {
+        const { path, new_path } = args as {
+          path: string;
+          new_path: string;
+        };
+
+        if (!new_path.endsWith(".ipynb")) {
+          throw new Error("New path must end in .ipynb");
+        }
+
+        // Disconnect from notebook if connected
+        const existing = connectedNotebooks.get(path);
+        if (existing) {
+          existing.provider.destroy();
+          connectedNotebooks.delete(path);
+        }
+
+        // Use Jupyter contents API to rename
+        const response = await apiFetch(`/api/contents/${encodeURIComponent(path)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ path: new_path }),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`Failed to rename notebook: ${response.status} ${error}`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Renamed ${path} to ${new_path}`,
+            },
+          ],
+        };
+      }
+
+      case "diff_notebooks": {
+        const { path1, path2, include_outputs } = args as {
+          path1: string;
+          path2: string;
+          include_outputs?: boolean;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session1 = sessions.find((s) => s.path === path1);
+        const session2 = sessions.find((s) => s.path === path2);
+
+        const { doc: doc1 } = await connectToNotebook(path1, session1?.kernelId);
+        const { doc: doc2 } = await connectToNotebook(path2, session2?.kernelId);
+
+        const cells1 = doc1.getArray("cells");
+        const cells2 = doc2.getArray("cells");
+
+        const diffs: string[] = [];
+
+        // Compare cell counts
+        if (cells1.length !== cells2.length) {
+          diffs.push(`Cell count: ${path1} has ${cells1.length} cells, ${path2} has ${cells2.length} cells`);
+        }
+
+        // Compare cells
+        const maxCells = Math.max(cells1.length, cells2.length);
+        for (let i = 0; i < maxCells; i++) {
+          const cell1 = i < cells1.length ? (cells1.get(i) as Y.Map<any>) : null;
+          const cell2 = i < cells2.length ? (cells2.get(i) as Y.Map<any>) : null;
+
+          if (!cell1) {
+            diffs.push(`[${i}] Only in ${path2}: ${getCellType(cell2)} cell`);
+            continue;
+          }
+          if (!cell2) {
+            diffs.push(`[${i}] Only in ${path1}: ${getCellType(cell1)} cell`);
+            continue;
+          }
+
+          const type1 = getCellType(cell1);
+          const type2 = getCellType(cell2);
+          if (type1 !== type2) {
+            diffs.push(`[${i}] Type differs: ${type1} vs ${type2}`);
+          }
+
+          const source1 = extractSource(cell1);
+          const source2 = extractSource(cell2);
+          if (source1 !== source2) {
+            const preview1 = source1.slice(0, 50).replace(/\n/g, "\\n");
+            const preview2 = source2.slice(0, 50).replace(/\n/g, "\\n");
+            diffs.push(`[${i}] Source differs:\n  ${path1}: "${preview1}..."\n  ${path2}: "${preview2}..."`);
+          }
+
+          if (include_outputs && type1 === "code") {
+            const outputs1 = cell1.get("outputs");
+            const outputs2 = cell2.get("outputs");
+            const out1Json = outputs1 instanceof Y.Array ? JSON.stringify(outputs1.toJSON()) : "[]";
+            const out2Json = outputs2 instanceof Y.Array ? JSON.stringify(outputs2.toJSON()) : "[]";
+            if (out1Json !== out2Json) {
+              diffs.push(`[${i}] Outputs differ`);
+            }
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: diffs.length === 0
+                ? `Notebooks ${path1} and ${path2} are identical`
+                : `Differences between ${path1} and ${path2}:\n\n${diffs.join("\n\n")}`,
             },
           ],
         };

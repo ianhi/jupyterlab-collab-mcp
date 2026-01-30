@@ -72,6 +72,19 @@ No token in config - just paste your JupyterLab URL when connecting.
 | `remove_cell_tags` | Remove tags from cell(s) |
 | `get_notebook_metadata` | Get notebook-level metadata |
 | `set_notebook_metadata` | Set notebook-level metadata |
+| `rename_notebook` | Rename a notebook file |
+| `diff_notebooks` | Compare two notebooks cell by cell |
+
+### Non-Contiguous Cell Operations
+
+Metadata and tag tools support both ranges and specific indices:
+```
+# Range (contiguous)
+add_cell_tags(path, index=0, end_index=5, tags=["hide-input"])
+
+# Specific cells (non-contiguous)
+add_cell_tags(path, indices=[2,4,6,8], tags=["hide-input"])
+```
 
 ### Context-Efficient Reading
 
