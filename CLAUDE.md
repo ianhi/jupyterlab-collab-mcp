@@ -24,14 +24,21 @@ src/
 | `open_notebook` | Open a notebook and start its kernel |
 | `create_notebook` | Create a new notebook file |
 | `get_notebook_content` | Get cells with filtering (code only by default) |
+| `get_notebook_outline` | Get condensed structure (headers + first lines) |
 | `search_notebook` | Grep through source code and outputs |
 | `insert_cell` | Insert a new cell at position |
 | `insert_and_execute` | Insert a cell and run it in one operation |
 | `update_cell` | Update cell source code |
 | `update_and_execute` | Update a cell and run it in one operation |
+| `change_cell_type` | Change cell type (code ↔ markdown) |
 | `delete_cell` | Delete a cell |
+| `delete_cells` | Delete multiple cells at once |
+| `copy_cells` | Copy cells within/between notebooks |
+| `move_cells` | Move/reorder cells within/between notebooks |
+| `clear_outputs` | Clear execution outputs |
 | `get_user_focus` | See user's current cell via awareness |
 | `execute_cell` | Execute a cell, show outputs in JupyterLab |
+| `execute_range` | Execute multiple cells in sequence |
 | `execute_code` | Execute code (optionally as new cell with outputs) |
 
 ### Context-Efficient Reading

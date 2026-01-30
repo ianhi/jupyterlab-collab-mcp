@@ -838,6 +838,172 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["path"],
         },
       },
+      {
+        name: "delete_cells",
+        description:
+          "Delete multiple cells at once. More efficient than calling delete_cell repeatedly.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            start_index: {
+              type: "number",
+              description: "First cell index to delete (inclusive)",
+            },
+            end_index: {
+              type: "number",
+              description: "Last cell index to delete (inclusive)",
+            },
+          },
+          required: ["path", "start_index", "end_index"],
+        },
+      },
+      {
+        name: "copy_cells",
+        description:
+          "Copy one or more cells from one notebook to another (or within the same notebook). For single cell, use same value for start_index and end_index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_path: {
+              type: "string",
+              description: "Source notebook path",
+            },
+            dest_path: {
+              type: "string",
+              description: "Destination notebook path",
+            },
+            start_index: {
+              type: "number",
+              description: "First cell index to copy (inclusive)",
+            },
+            end_index: {
+              type: "number",
+              description: "Last cell index to copy (inclusive)",
+            },
+            dest_index: {
+              type: "number",
+              description: "Position in destination to insert cells. Default: end",
+            },
+          },
+          required: ["source_path", "dest_path", "start_index", "end_index"],
+        },
+      },
+      {
+        name: "move_cells",
+        description:
+          "Move one or more cells within a notebook (reorder) or between notebooks (removes from source). For single cell, use same value for start_index and end_index.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_path: {
+              type: "string",
+              description: "Source notebook path",
+            },
+            dest_path: {
+              type: "string",
+              description: "Destination notebook path (can be same as source for reordering)",
+            },
+            start_index: {
+              type: "number",
+              description: "First cell index to move (inclusive)",
+            },
+            end_index: {
+              type: "number",
+              description: "Last cell index to move (inclusive)",
+            },
+            dest_index: {
+              type: "number",
+              description: "Position in destination to insert cells",
+            },
+          },
+          required: ["source_path", "dest_path", "start_index", "end_index", "dest_index"],
+        },
+      },
+      {
+        name: "change_cell_type",
+        description:
+          "Change a cell's type (code <-> markdown) in place, preserving content.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index to change",
+            },
+            new_type: {
+              type: "string",
+              enum: ["code", "markdown"],
+              description: "New cell type",
+            },
+          },
+          required: ["path", "index", "new_type"],
+        },
+      },
+      {
+        name: "get_notebook_outline",
+        description:
+          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for navigating large notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "execute_range",
+        description:
+          "Execute multiple cells in sequence. Useful for running a section or the entire notebook.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            start_index: {
+              type: "number",
+              description: "First cell index to execute. Default: 0",
+            },
+            end_index: {
+              type: "number",
+              description: "Last cell index to execute (inclusive). Default: last cell",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "clear_outputs",
+        description:
+          "Clear execution outputs from cells. Useful before committing notebooks.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            index: {
+              type: "number",
+              description: "Cell index to clear. If omitted, clears all cells.",
+            },
+          },
+          required: ["path"],
+        },
+      },
     ],
   };
 });
@@ -1750,6 +1916,416 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             },
           ],
         };
+      }
+
+      case "delete_cells": {
+        const { path, start_index, end_index } = args as {
+          path: string;
+          start_index: number;
+          end_index: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        if (start_index < 0 || end_index >= cells.length || start_index > end_index) {
+          throw new Error(
+            `Invalid range [${start_index}, ${end_index}]. Notebook has ${cells.length} cells.`
+          );
+        }
+
+        const count = end_index - start_index + 1;
+        cells.delete(start_index, count);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Deleted ${count} cells (indices ${start_index}-${end_index}) from ${path}`,
+            },
+          ],
+        };
+      }
+
+      case "copy_cells": {
+        const { source_path, dest_path, start_index, end_index, dest_index } = args as {
+          source_path: string;
+          dest_path: string;
+          start_index: number;
+          end_index: number;
+          dest_index?: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const sourceSession = sessions.find((s) => s.path === source_path);
+        const destSession = sessions.find((s) => s.path === dest_path);
+
+        const { doc: sourceDoc } = await connectToNotebook(source_path, sourceSession?.kernelId);
+        const sourceCells = sourceDoc.getArray("cells");
+
+        if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
+          throw new Error(
+            `Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`
+          );
+        }
+
+        const { doc: destDoc } = await connectToNotebook(dest_path, destSession?.kernelId);
+        const destCells = destDoc.getArray("cells");
+
+        const insertAt = dest_index ?? destCells.length;
+
+        // Copy cells
+        const copiedCells: Y.Map<any>[] = [];
+        for (let i = start_index; i <= end_index; i++) {
+          const sourceCell = sourceCells.get(i) as Y.Map<any>;
+
+          // Create new cell with copied content
+          const newCell = new Y.Map();
+          const cellType = sourceCell.get("cell_type") || "code";
+          newCell.set("cell_type", cellType);
+          newCell.set("source", new Y.Text(extractSource(sourceCell)));
+          newCell.set("metadata", new Y.Map());
+          newCell.set("id", crypto.randomUUID());
+
+          if (cellType === "code") {
+            newCell.set("outputs", new Y.Array());
+            newCell.set("execution_count", null);
+          }
+
+          copiedCells.push(newCell);
+        }
+
+        destCells.insert(insertAt, copiedCells);
+
+        const count = end_index - start_index + 1;
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}`,
+            },
+          ],
+        };
+      }
+
+      case "move_cells": {
+        const { source_path, dest_path, start_index, end_index, dest_index } = args as {
+          source_path: string;
+          dest_path: string;
+          start_index: number;
+          end_index: number;
+          dest_index: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const sourceSession = sessions.find((s) => s.path === source_path);
+        const destSession = sessions.find((s) => s.path === dest_path);
+
+        const { doc: sourceDoc } = await connectToNotebook(source_path, sourceSession?.kernelId);
+        const sourceCells = sourceDoc.getArray("cells");
+
+        if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
+          throw new Error(
+            `Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`
+          );
+        }
+
+        const sameNotebook = source_path === dest_path;
+        const count = end_index - start_index + 1;
+
+        // Collect cells to move (need to copy content before deleting)
+        const cellsToMove: Y.Map<any>[] = [];
+        for (let i = start_index; i <= end_index; i++) {
+          const sourceCell = sourceCells.get(i) as Y.Map<any>;
+          const newCell = new Y.Map();
+          const cellType = sourceCell.get("cell_type") || "code";
+          newCell.set("cell_type", cellType);
+          newCell.set("source", new Y.Text(extractSource(sourceCell)));
+          newCell.set("metadata", new Y.Map());
+          newCell.set("id", crypto.randomUUID());
+          if (cellType === "code") {
+            newCell.set("outputs", new Y.Array());
+            newCell.set("execution_count", null);
+          }
+          cellsToMove.push(newCell);
+        }
+
+        if (sameNotebook) {
+          // Moving within same notebook - need to handle index adjustment
+          // Delete first, then insert (adjusting dest_index if needed)
+          sourceCells.delete(start_index, count);
+
+          // Adjust destination index if it was after the deleted range
+          let adjustedDest = dest_index;
+          if (dest_index > start_index) {
+            adjustedDest = Math.max(0, dest_index - count);
+          }
+
+          sourceCells.insert(adjustedDest, cellsToMove);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}`,
+              },
+            ],
+          };
+        } else {
+          // Moving between notebooks
+          const { doc: destDoc } = await connectToNotebook(dest_path, destSession?.kernelId);
+          const destCells = destDoc.getArray("cells");
+
+          // Insert into destination
+          destCells.insert(dest_index, cellsToMove);
+
+          // Delete from source
+          sourceCells.delete(start_index, count);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}`,
+              },
+            ],
+          };
+        }
+      }
+
+      case "change_cell_type": {
+        const { path, index, new_type } = args as {
+          path: string;
+          index: number;
+          new_type: "code" | "markdown";
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        if (index < 0 || index >= cells.length) {
+          throw new Error(`Invalid cell index ${index}. Notebook has ${cells.length} cells.`);
+        }
+
+        const cell = cells.get(index) as Y.Map<any>;
+        const oldType = cell.get("cell_type") || "code";
+
+        if (oldType === new_type) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cell ${index} is already type '${new_type}'`,
+              },
+            ],
+          };
+        }
+
+        cell.set("cell_type", new_type);
+
+        // Add/remove code-specific fields
+        if (new_type === "code") {
+          if (!cell.get("outputs")) {
+            cell.set("outputs", new Y.Array());
+          }
+          if (!cell.has("execution_count")) {
+            cell.set("execution_count", null);
+          }
+        } else {
+          // For markdown, we can optionally remove code fields
+          // but leaving them doesn't hurt
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Changed cell ${index} from '${oldType}' to '${new_type}'`,
+            },
+          ],
+        };
+      }
+
+      case "get_notebook_outline": {
+        const { path } = args as { path: string };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const outline: any[] = [];
+        for (let i = 0; i < cells.length; i++) {
+          const cell = cells.get(i) as any;
+          const type = getCellType(cell);
+          const source = extractSource(cell);
+
+          if (type === "markdown") {
+            // Extract headers from markdown
+            const lines = source.split("\n");
+            for (const line of lines) {
+              const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
+              if (headerMatch) {
+                outline.push({
+                  index: i,
+                  type: "header",
+                  level: headerMatch[1].length,
+                  text: headerMatch[2].trim(),
+                });
+              }
+            }
+          } else if (type === "code") {
+            // First non-empty line of code
+            const firstLine = source.split("\n").find((l) => l.trim()) || "(empty)";
+            outline.push({
+              index: i,
+              type: "code",
+              preview: firstLine.slice(0, 60) + (firstLine.length > 60 ? "..." : ""),
+            });
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Outline of ${path} (${cells.length} cells):\n\n${JSON.stringify(outline, null, 2)}`,
+            },
+          ],
+        };
+      }
+
+      case "execute_range": {
+        const { path, start_index = 0, end_index } = args as {
+          path: string;
+          start_index?: number;
+          end_index?: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          throw new Error(
+            `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
+          );
+        }
+
+        const { doc } = await connectToNotebook(path, session.kernelId);
+        const cells = doc.getArray("cells");
+
+        const endIdx = end_index ?? cells.length - 1;
+
+        if (start_index < 0 || endIdx >= cells.length || start_index > endIdx) {
+          throw new Error(
+            `Invalid range [${start_index}, ${endIdx}]. Notebook has ${cells.length} cells.`
+          );
+        }
+
+        const results: { index: number; status: string; output?: string }[] = [];
+
+        for (let i = start_index; i <= endIdx; i++) {
+          const cell = cells.get(i) as Y.Map<any>;
+          const type = getCellType(cell);
+
+          if (type !== "code") {
+            results.push({ index: i, status: "skipped (not code)" });
+            continue;
+          }
+
+          const source = extractSource(cell);
+          if (!source.trim()) {
+            results.push({ index: i, status: "skipped (empty)" });
+            continue;
+          }
+
+          try {
+            const result = await executeCode(session.kernelId, source);
+            updateCellOutputs(cell, result);
+            results.push({
+              index: i,
+              status: result.status,
+              output: result.text ? result.text.slice(0, 100) + (result.text.length > 100 ? "..." : "") : undefined,
+            });
+          } catch (err: any) {
+            results.push({ index: i, status: `error: ${err.message}` });
+          }
+        }
+
+        const successCount = results.filter((r) => r.status === "ok").length;
+        const errorCount = results.filter((r) => r.status === "error" || r.status.startsWith("error:")).length;
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Executed cells ${start_index}-${endIdx} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}`,
+            },
+          ],
+        };
+      }
+
+      case "clear_outputs": {
+        const { path, index } = args as { path: string; index?: number };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        if (index !== undefined) {
+          // Clear single cell
+          if (index < 0 || index >= cells.length) {
+            throw new Error(`Invalid cell index ${index}. Notebook has ${cells.length} cells.`);
+          }
+
+          const cell = cells.get(index) as Y.Map<any>;
+          const outputs = cell.get("outputs");
+          if (outputs instanceof Y.Array && outputs.length > 0) {
+            outputs.delete(0, outputs.length);
+          }
+          cell.set("execution_count", null);
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cleared outputs from cell ${index} in ${path}`,
+              },
+            ],
+          };
+        } else {
+          // Clear all cells
+          let clearedCount = 0;
+          for (let i = 0; i < cells.length; i++) {
+            const cell = cells.get(i) as Y.Map<any>;
+            if (getCellType(cell) === "code") {
+              const outputs = cell.get("outputs");
+              if (outputs instanceof Y.Array && outputs.length > 0) {
+                outputs.delete(0, outputs.length);
+                clearedCount++;
+              }
+              cell.set("execution_count", null);
+            }
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cleared outputs from ${clearedCount} cells in ${path}`,
+              },
+            ],
+          };
+        }
       }
 
       default:
