@@ -1020,7 +1020,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "find_cells_by_tag",
         description:
-          "Find cells that have specific tag(s). Returns cell indices and their tags. Useful for locating cells marked with 'hide-input', 'parameters', etc.",
+          "Find cells that have specific tag(s). Returns cell indices, tags, and optionally source preview. Useful for locating cells marked with 'hide-input', 'parameters', etc.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1036,6 +1036,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             match_all: {
               type: "boolean",
               description: "If true, only return cells that have ALL specified tags. Default: false (match any)",
+            },
+            include_preview: {
+              type: "boolean",
+              description: "Include first line of source for context. Default: false",
             },
           },
           required: ["path", "tags"],
@@ -2579,7 +2583,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const executionCount = cell.get("execution_count");
 
           if (!outputs || !(outputs instanceof Y.Array) || outputs.length === 0) {
-            results.push({ index: idx, type, execution_count: executionCount, outputs: [] });
+            // Distinguish "not executed" from "no output"
+            const status = executionCount === null ? "(not executed)" : "(no output)";
+            results.push({ index: idx, type, execution_count: executionCount, outputs: status });
             continue;
           }
 
@@ -2844,10 +2850,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "find_cells_by_tag": {
-        const { path, tags, match_all = false } = args as {
+        const { path, tags, match_all = false, include_preview = false } = args as {
           path: string;
           tags: string[];
           match_all?: boolean;
+          include_preview?: boolean;
         };
 
         const sessions = await listNotebookSessions();
@@ -2856,7 +2863,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const matches: { index: number; type: string; tags: string[] }[] = [];
+        const matches: { index: number; type: string; tags: string[]; preview?: string }[] = [];
 
         for (let i = 0; i < cells.length; i++) {
           const cell = cells.get(i) as Y.Map<any>;
@@ -2880,7 +2887,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             : tags.some((t) => cellTags.includes(t));
 
           if (hasMatch) {
-            matches.push({ index: i, type, tags: cellTags });
+            const result: { index: number; type: string; tags: string[]; preview?: string } = {
+              index: i,
+              type,
+              tags: cellTags,
+            };
+            if (include_preview) {
+              const source = extractSource(cell);
+              result.preview = getCodePreview(source);
+            }
+            matches.push(result);
           }
         }
 
