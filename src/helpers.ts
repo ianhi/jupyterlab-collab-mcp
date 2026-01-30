@@ -295,3 +295,78 @@ export function updateCellOutputs(
     outputsArray.push([outputMap]);
   }
 }
+
+/**
+ * Create a RegExp from a pattern, escaping special characters if invalid regex
+ */
+export function createSafeRegex(pattern: string, caseSensitive: boolean = false): RegExp {
+  const flags = caseSensitive ? "g" : "gi";
+  try {
+    return new RegExp(pattern, flags);
+  } catch {
+    // Escape special regex characters and use as literal string
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(escaped, flags);
+  }
+}
+
+/**
+ * Extract markdown headers from source text
+ * Returns array of { level, text } for each header found
+ */
+export function extractMarkdownHeaders(source: string): { level: number; text: string }[] {
+  const headers: { level: number; text: string }[] = [];
+  const lines = source.split("\n");
+
+  for (const line of lines) {
+    const match = line.match(/^(#{1,6})\s+(.+)/);
+    if (match) {
+      headers.push({
+        level: match[1].length,
+        text: match[2].trim(),
+      });
+    }
+  }
+
+  return headers;
+}
+
+/**
+ * Get a preview of code (first non-empty line, truncated)
+ */
+export function getCodePreview(source: string, maxLength: number = 60): string {
+  const firstLine = source.split("\n").find((line) => line.trim()) || "(empty)";
+  if (firstLine.length <= maxLength) {
+    return firstLine;
+  }
+  return firstLine.slice(0, maxLength) + "...";
+}
+
+/**
+ * Extract text from outputs including traceback for errors.
+ * More comprehensive than formatOutputsAsText - includes full error traceback.
+ */
+export function extractOutputsWithTraceback(outputs: any[]): string {
+  if (!outputs || outputs.length === 0) return "";
+
+  const parts: string[] = [];
+  for (const out of outputs) {
+    switch (out.output_type) {
+      case "stream":
+        parts.push(out.text || "");
+        break;
+      case "execute_result":
+      case "display_data":
+        const text = out.data?.["text/plain"];
+        if (text) parts.push(text);
+        break;
+      case "error":
+        parts.push(`${out.ename}: ${out.evalue}`);
+        if (out.traceback) {
+          parts.push(out.traceback.join("\n"));
+        }
+        break;
+    }
+  }
+  return parts.join("\n");
+}

@@ -10,6 +10,10 @@ import {
   formatOutputsAsText,
   extractOutputText,
   updateCellOutputs,
+  createSafeRegex,
+  extractMarkdownHeaders,
+  getCodePreview,
+  extractOutputsWithTraceback,
   type ExecutionResult,
 } from "./helpers.js";
 
@@ -612,5 +616,179 @@ describe("updateCellOutputs", () => {
 
     const outputs = cell.get("outputs") as Y.Array<any>;
     expect(outputs.length).toBe(0);
+  });
+});
+
+describe("createSafeRegex", () => {
+  it("creates regex from valid pattern", () => {
+    const regex = createSafeRegex("hello");
+    expect("hello world".match(regex)).toBeTruthy();
+  });
+
+  it("is case-insensitive by default", () => {
+    const regex = createSafeRegex("hello");
+    expect("HELLO".match(regex)).toBeTruthy();
+  });
+
+  it("respects caseSensitive parameter", () => {
+    const regex = createSafeRegex("hello", true);
+    expect("HELLO".match(regex)).toBeFalsy();
+    expect("hello".match(regex)).toBeTruthy();
+  });
+
+  it("escapes invalid regex patterns", () => {
+    // [unclosed bracket is invalid regex
+    const regex = createSafeRegex("[unclosed");
+    expect("[unclosed bracket".match(regex)).toBeTruthy();
+  });
+
+  it("escapes special characters in invalid patterns", () => {
+    // Pattern with unmatched parenthesis is invalid regex
+    const regex = createSafeRegex("func(arg");
+    expect("call func(arg here".match(regex)).toBeTruthy();
+  });
+
+  it("handles complex regex patterns", () => {
+    const regex = createSafeRegex("\\d+");
+    expect("123".match(regex)).toBeTruthy();
+    expect("abc".match(regex)).toBeFalsy();
+  });
+
+  it("handles empty pattern", () => {
+    const regex = createSafeRegex("");
+    expect("anything".match(regex)).toBeTruthy();
+  });
+});
+
+describe("extractMarkdownHeaders", () => {
+  it("extracts single header", () => {
+    const headers = extractMarkdownHeaders("# Title");
+    expect(headers).toEqual([{ level: 1, text: "Title" }]);
+  });
+
+  it("extracts multiple headers at different levels", () => {
+    const source = "# Title\n## Section 1\n### Subsection\n## Section 2";
+    const headers = extractMarkdownHeaders(source);
+    expect(headers).toEqual([
+      { level: 1, text: "Title" },
+      { level: 2, text: "Section 1" },
+      { level: 3, text: "Subsection" },
+      { level: 2, text: "Section 2" },
+    ]);
+  });
+
+  it("trims header text", () => {
+    const headers = extractMarkdownHeaders("#   Spaced Title   ");
+    expect(headers).toEqual([{ level: 1, text: "Spaced Title" }]);
+  });
+
+  it("ignores non-header lines", () => {
+    const source = "Regular text\n# Header\nMore text";
+    const headers = extractMarkdownHeaders(source);
+    expect(headers).toEqual([{ level: 1, text: "Header" }]);
+  });
+
+  it("returns empty array for no headers", () => {
+    const headers = extractMarkdownHeaders("No headers here\nJust text");
+    expect(headers).toEqual([]);
+  });
+
+  it("handles h6 headers", () => {
+    const headers = extractMarkdownHeaders("###### Deep header");
+    expect(headers).toEqual([{ level: 6, text: "Deep header" }]);
+  });
+
+  it("ignores lines with more than 6 hashes", () => {
+    const headers = extractMarkdownHeaders("####### Not a header");
+    expect(headers).toEqual([]);
+  });
+
+  it("requires space after hashes", () => {
+    const headers = extractMarkdownHeaders("#NoSpace");
+    expect(headers).toEqual([]);
+  });
+});
+
+describe("getCodePreview", () => {
+  it("returns first line for short code", () => {
+    expect(getCodePreview("print('hello')")).toBe("print('hello')");
+  });
+
+  it("truncates long lines", () => {
+    const longLine = "x = " + "a".repeat(100);
+    const preview = getCodePreview(longLine);
+    expect(preview.length).toBe(63); // 60 + "..."
+    expect(preview.endsWith("...")).toBe(true);
+  });
+
+  it("skips empty lines to find first code", () => {
+    const code = "\n\n  \nprint('hello')";
+    expect(getCodePreview(code)).toBe("print('hello')");
+  });
+
+  it("returns (empty) for empty or whitespace-only source", () => {
+    expect(getCodePreview("")).toBe("(empty)");
+    expect(getCodePreview("   \n  \n")).toBe("(empty)");
+  });
+
+  it("respects custom maxLength", () => {
+    const preview = getCodePreview("print('hello world')", 10);
+    expect(preview).toBe("print('hel...");
+  });
+
+  it("does not truncate if exactly at maxLength", () => {
+    const preview = getCodePreview("1234567890", 10);
+    expect(preview).toBe("1234567890");
+  });
+});
+
+describe("extractOutputsWithTraceback", () => {
+  it("returns empty string for empty outputs", () => {
+    expect(extractOutputsWithTraceback([])).toBe("");
+    expect(extractOutputsWithTraceback(null as any)).toBe("");
+    expect(extractOutputsWithTraceback(undefined as any)).toBe("");
+  });
+
+  it("extracts stream output", () => {
+    const outputs = [{ output_type: "stream", text: "Hello" }];
+    expect(extractOutputsWithTraceback(outputs)).toBe("Hello");
+  });
+
+  it("extracts execute_result text/plain", () => {
+    const outputs = [{
+      output_type: "execute_result",
+      data: { "text/plain": "42" },
+    }];
+    expect(extractOutputsWithTraceback(outputs)).toBe("42");
+  });
+
+  it("extracts error with traceback", () => {
+    const outputs = [{
+      output_type: "error",
+      ename: "ValueError",
+      evalue: "bad value",
+      traceback: ["Traceback...", "  File 'test.py'", "ValueError: bad value"],
+    }];
+    const result = extractOutputsWithTraceback(outputs);
+    expect(result).toContain("ValueError: bad value");
+    expect(result).toContain("Traceback...");
+    expect(result).toContain("File 'test.py'");
+  });
+
+  it("combines multiple outputs with newlines", () => {
+    const outputs = [
+      { output_type: "stream", text: "Loading" },
+      { output_type: "execute_result", data: { "text/plain": "Done" } },
+    ];
+    expect(extractOutputsWithTraceback(outputs)).toBe("Loading\nDone");
+  });
+
+  it("handles error without traceback", () => {
+    const outputs = [{
+      output_type: "error",
+      ename: "Error",
+      evalue: "message",
+    }];
+    expect(extractOutputsWithTraceback(outputs)).toBe("Error: message");
   });
 });

@@ -26,6 +26,10 @@ import {
   parseJupyterUrl,
   generateUnifiedDiff,
   updateCellOutputs,
+  createSafeRegex,
+  extractMarkdownHeaders,
+  getCodePreview,
+  extractOutputsWithTraceback,
   type NotebookOutput,
   type ExecutionResult,
 } from "./helpers.js";
@@ -380,7 +384,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "list_notebooks",
         description:
-          "List notebooks with active kernel sessions. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel. Returns paths and kernel IDs.",
+          "List notebooks with active kernel sessions. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel, or list_files to see all .ipynb files regardless of kernel state. Returns paths and kernel IDs.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -468,7 +472,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_notebook_outline",
         description:
-          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for finding cell indices before using update_cell or add_cell_tags.",
+          "Get a condensed outline of the notebook structure. Returns cell indices with markdown headers (by level) and first line preview of code cells. Useful for navigating and finding cell indices before using update_cell or add_cell_tags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -554,7 +558,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "update_cell",
-        description: "Update the source code of an existing cell. Only modifies source, not metadata/tags (use add_cell_tags/set_cell_metadata for those). Changes sync in real-time to JupyterLab.",
+        description: "Update the source code of an existing cell. Only modifies source, not metadata/tags (use add_cell_tags/set_cell_metadata for those). Preserves cell outputs; use clear_outputs to remove them. Changes sync in real-time to JupyterLab.",
         inputSchema: {
           type: "object",
           properties: {
@@ -747,7 +751,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_range",
         description:
-          "Execute multiple cells in sequence. Useful for running a section or the entire notebook.",
+          "Execute multiple cells in sequence. Continues on error (doesn't stop). Returns status per cell. Useful for running a section or the entire notebook.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1059,7 +1063,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "diff_notebooks",
         description:
-          "Compare two .ipynb notebooks cell by cell. Both must be open in JupyterLab. Use summary_only=true for counts only.",
+          "Compare two .ipynb notebooks cell by cell. Returns unified diff showing additions (+), deletions (-), and modifications per cell. Both must be open in JupyterLab. Use summary_only=true for counts only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1740,14 +1744,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
 
-        const flags = case_sensitive ? "g" : "gi";
-        let regex: RegExp;
-        try {
-          regex = new RegExp(pattern, flags);
-        } catch {
-          // If invalid regex, escape and use as literal string
-          regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags);
-        }
+        const regex = createSafeRegex(pattern, case_sensitive);
 
         const matches: any[] = [];
 
@@ -2251,26 +2248,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const source = extractSource(cell);
 
           if (type === "markdown") {
-            // Extract headers from markdown
-            const lines = source.split("\n");
-            for (const line of lines) {
-              const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
-              if (headerMatch) {
-                outline.push({
-                  index: i,
-                  type: "header",
-                  level: headerMatch[1].length,
-                  text: headerMatch[2].trim(),
-                });
-              }
+            // Extract headers from markdown using helper
+            const headers = extractMarkdownHeaders(source);
+            for (const header of headers) {
+              outline.push({
+                index: i,
+                type: "header",
+                level: header.level,
+                text: header.text,
+              });
             }
           } else if (type === "code") {
-            // First non-empty line of code
-            const firstLine = source.split("\n").find((l) => l.trim()) || "(empty)";
+            // First non-empty line of code using helper
             outline.push({
               index: i,
               type: "code",
-              preview: firstLine.slice(0, 60) + (firstLine.length > 60 ? "..." : ""),
+              preview: getCodePreview(source),
             });
           }
         }
