@@ -90,9 +90,16 @@ async function listNotebookSessions(): Promise<NotebookSession[]> {
   }
 
   const sessions: any[] = await response.json();
+  // Deduplicate by path (same notebook can have multiple sessions)
+  const seen = new Set<string>();
   return sessions
     .filter((s) => s.type === "notebook")
-    .map((s) => ({ path: s.path, kernelId: s.kernel?.id }));
+    .map((s) => ({ path: s.path, kernelId: s.kernel?.id }))
+    .filter((s) => {
+      if (seen.has(s.path)) return false;
+      seen.add(s.path);
+      return true;
+    });
 }
 
 interface CollabSession {
@@ -507,6 +514,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             case_sensitive: {
               type: "boolean",
               description: "Case-sensitive search. Default: false",
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum number of matching cells to return. Default: unlimited",
+            },
+            max_source_length: {
+              type: "number",
+              description: "Truncate source/output to this length (adds ... if truncated). Default: 500",
             },
           },
           required: ["path", "pattern"],
@@ -1874,11 +1889,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           pattern,
           search_in = "all",
           case_sensitive = false,
+          max_results,
+          max_source_length = 500,
         } = args as {
           path: string;
           pattern: string;
           search_in?: "source" | "outputs" | "all";
           case_sensitive?: boolean;
+          max_results?: number;
+          max_source_length?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -1889,9 +1908,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const regex = createSafeRegex(pattern, case_sensitive);
 
+        // Helper to truncate text
+        const truncate = (text: string): string => {
+          if (text.length <= max_source_length) return text;
+          return text.slice(0, max_source_length) + "...";
+        };
+
         const matches: any[] = [];
 
         for (let i = 0; i < cells.length; i++) {
+          // Stop if we've hit max_results
+          if (max_results !== undefined && matches.length >= max_results) break;
+
           const cell = cells.get(i) as any;
           const type = getCellType(cell);
           const source = extractSource(cell);
@@ -1908,8 +1936,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             if (sourceMatches) {
               hasMatch = true;
               cellMatches.source_matches = sourceMatches.length;
-              // Include source with context
-              cellMatches.source = source;
+              // Include source with context (truncated)
+              cellMatches.source = truncate(source);
             }
           }
 
@@ -1939,7 +1967,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               if (outputMatches) {
                 hasMatch = true;
                 cellMatches.output_matches = outputMatches.length;
-                cellMatches.output = combinedOutput;
+                cellMatches.output = truncate(combinedOutput);
               }
             }
           }
@@ -2423,13 +2451,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           if (type === "markdown") {
             // Extract headers from markdown using helper
             const headers = extractMarkdownHeaders(source);
-            for (const header of headers) {
-              outline.push({
+            for (let h = 0; h < headers.length; h++) {
+              const header = headers[h];
+              const entry: any = {
                 index: i,
                 type: "header",
                 level: header.level,
                 text: header.text,
-              });
+              };
+              // Show header position within cell if multiple headers
+              if (headers.length > 1) {
+                entry.header_num = h + 1;
+              }
+              outline.push(entry);
             }
           } else if (type === "code") {
             // First non-empty line of code using helper
@@ -3174,14 +3208,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const kernel = await response.json();
+        const lines = [
+          `Kernel status for ${path}:`,
+          `  Status: ${kernel.execution_state || "unknown"}`,
+          `  Name: ${kernel.name}`,
+          `  ID: ${kernel.id}`,
+        ];
+        if (kernel.connections !== undefined) {
+          lines.push(`  Connections: ${kernel.connections}`);
+        }
+        if (kernel.last_activity) {
+          lines.push(`  Last activity: ${kernel.last_activity}`);
+        }
         return {
           content: [
             {
               type: "text",
-              text: `Kernel status for ${path}:\n` +
-                `  Status: ${kernel.execution_state || "unknown"}\n` +
-                `  Name: ${kernel.name}\n` +
-                `  ID: ${kernel.id}`,
+              text: lines.join("\n"),
             },
           ],
         };
