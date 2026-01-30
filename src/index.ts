@@ -683,7 +683,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_notebook_outline",
         description:
-          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for navigating large notebooks.",
+          "Get a condensed outline of the notebook structure. Shows markdown headers and first line of code cells. Useful for finding cell indices before using update_cell or add_cell_tags.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1110,7 +1110,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "add_cell_tags",
         description:
-          "Add tags to one or more cells. Common tags: 'skip-execution', 'hide-input', 'hide-output', 'parameters' (papermill). Supports ranges or specific non-contiguous indices.",
+          "Add tags to one or more cells. Common tags: 'hide-input', 'hide-output', 'remove-input', 'remove-output', 'remove-cell', 'skip-execution', 'parameters' (papermill). Supports non-contiguous indices.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1274,7 +1274,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "diff_notebooks",
         description:
-          "Compare two notebooks cell by cell, showing differences in source code and cell types.",
+          "Compare two .ipynb notebooks cell by cell, showing differences in source code and cell types. Both must be open in JupyterLab.",
         inputSchema: {
           type: "object",
           properties: {
