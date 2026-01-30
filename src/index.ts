@@ -119,8 +119,11 @@ async function requestCollabSession(path: string): Promise<CollabSession> {
   );
 
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(`Notebook '${path}' not found. Check the path and try again.`);
+    }
     throw new Error(
-      `Failed to request session: ${response.status} ${response.statusText}`
+      `Failed to request session for '${path}': ${response.status} ${response.statusText}`
     );
   }
 
@@ -1372,8 +1375,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         newCell.set("id", crypto.randomUUID());
 
-        const insertIndex =
-          index === undefined || index === -1 ? cells.length : index;
+        // Handle index: undefined/-1 = append, 0+ = insert at position
+        let insertIndex: number;
+        if (index === undefined || index === -1) {
+          insertIndex = cells.length;
+        } else if (index < -1) {
+          throw new Error(`Invalid index ${index}. Use -1 to append at end, or 0-${cells.length} to insert at a specific position.`);
+        } else if (index > cells.length) {
+          throw new Error(`Invalid index ${index}. Notebook has ${cells.length} cells. Use 0-${cells.length} or -1 to append.`);
+        } else {
+          insertIndex = index;
+        }
         cells.insert(insertIndex, [newCell]);
 
         // Show what was inserted
