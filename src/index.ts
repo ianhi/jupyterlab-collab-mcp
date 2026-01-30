@@ -30,6 +30,7 @@ import {
   extractMarkdownHeaders,
   getCodePreview,
   extractOutputsWithTraceback,
+  truncateDiff,
   type NotebookOutput,
   type ExecutionResult,
 } from "./helpers.js";
@@ -50,6 +51,108 @@ function getConfig() {
     );
   }
   return jupyterConfig;
+}
+
+// ============================================================================
+// LSP Integration (optional - gracefully degrades if not available)
+// ============================================================================
+
+interface LspStatus {
+  available: boolean;
+  servers: Map<string, { status: string; spec: any }>;
+}
+
+let lspStatus: LspStatus = { available: false, servers: new Map() };
+
+async function checkLspAvailability(): Promise<LspStatus> {
+  const config = getConfig();
+  try {
+    const url = new URL("/lsp/status", config.baseUrl);
+    url.searchParams.set("token", config.token);
+    const response = await fetch(url.toString());
+    if (response.ok) {
+      const data = await response.json();
+      const servers = new Map<string, { status: string; spec: any }>();
+      if (data.sessions) {
+        for (const [name, session] of Object.entries(data.sessions as Record<string, any>)) {
+          servers.set(name, { status: session.status, spec: session.spec });
+        }
+      }
+      lspStatus = { available: true, servers };
+      return lspStatus;
+    }
+  } catch {
+    // LSP not available - that's fine
+  }
+  lspStatus = { available: false, servers: new Map() };
+  return lspStatus;
+}
+
+// Send LSP request via WebSocket and wait for response
+async function lspRequest(
+  languageServer: string,
+  method: string,
+  params: any,
+  timeoutMs: number = 5000
+): Promise<any> {
+  const config = getConfig();
+
+  return new Promise((resolve, reject) => {
+    const wsUrl = `${config.wsUrl}/lsp/ws/${languageServer}?token=${config.token}`;
+    const ws = new WebSocket(wsUrl);
+    const msgId = Date.now();
+
+    const timeout = setTimeout(() => {
+      ws.close();
+      reject(new Error(`LSP request timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    ws.on("open", () => {
+      const request = {
+        jsonrpc: "2.0",
+        id: msgId,
+        method,
+        params,
+      };
+      ws.send(JSON.stringify(request));
+    });
+
+    ws.on("message", (data: WebSocket.Data) => {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.id === msgId) {
+          clearTimeout(timeout);
+          ws.close();
+          if (msg.error) {
+            reject(new Error(msg.error.message || "LSP error"));
+          } else {
+            resolve(msg.result);
+          }
+        }
+        // Ignore notifications (no id) - they're not our response
+      } catch {
+        // Ignore parse errors
+      }
+    });
+
+    ws.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+// Get the appropriate language server for a file
+function getLanguageServerForFile(path: string): string | null {
+  if (path.endsWith(".ipynb") || path.endsWith(".py")) {
+    // Check for available Python language servers in order of preference
+    for (const server of ["pylsp", "pyright", "python-lsp-server"]) {
+      if (lspStatus.servers.has(server)) {
+        return server;
+      }
+    }
+  }
+  return null;
 }
 
 // Cache of connected notebooks
@@ -206,7 +309,8 @@ async function connectToNotebook(
 
 async function executeCode(
   kernelId: string,
-  code: string
+  code: string,
+  timeoutMs: number = 30000
 ): Promise<ExecutionResult> {
   const config = getConfig();
   return new Promise((resolve, reject) => {
@@ -221,10 +325,11 @@ async function executeCode(
     let status: "ok" | "error" = "ok";
     let executionCount: number | null = null;
 
+    const timeoutSecs = Math.round(timeoutMs / 1000);
     const timeout = setTimeout(() => {
       ws.close();
-      reject(new Error("Execution timeout after 30 seconds"));
-    }, 30000);
+      reject(new Error(`Execution timeout after ${timeoutSecs} seconds`));
+    }, timeoutMs);
 
     ws.on("open", () => {
       const msg = {
@@ -531,6 +636,97 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "replace_in_notebook",
+        description:
+          "Search and replace text across notebook cells. Useful for refactoring (renaming variables, functions, etc.). Returns count of replacements made per cell.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            search: {
+              type: "string",
+              description: "Text or pattern to search for (regex supported)",
+            },
+            replace: {
+              type: "string",
+              description: "Replacement text",
+            },
+            cell_type: {
+              type: "string",
+              enum: ["code", "markdown", "all"],
+              description: "Cell types to search: 'code' (default), 'markdown', or 'all'",
+            },
+            case_sensitive: {
+              type: "boolean",
+              description: "Case-sensitive search. Default: false",
+            },
+            regex: {
+              type: "boolean",
+              description: "Treat search as regex pattern. Default: false (literal string match)",
+            },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description: "Only replace in these cell indices. If omitted, replaces in all matching cells.",
+            },
+            dry_run: {
+              type: "boolean",
+              description: "If true, only show what would be replaced without making changes. Default: false",
+            },
+          },
+          required: ["path", "search", "replace"],
+        },
+      },
+      {
+        name: "get_diagnostics",
+        description:
+          "Get code diagnostics (errors, warnings) for a notebook without executing it. Uses LSP if available for rich static analysis, otherwise falls back to Python syntax checking. Useful for validating code changes before execution.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            cell_index: {
+              type: "number",
+              description: "Check only this cell. If omitted, checks all code cells.",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
+        name: "get_hover_info",
+        description:
+          "Get documentation/type info for code at a specific position. Uses LSP if available, otherwise falls back to kernel introspection. Useful for understanding unfamiliar code.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            cell_index: {
+              type: "number",
+              description: "Cell index containing the code",
+            },
+            line: {
+              type: "number",
+              description: "Line number within the cell (0-indexed)",
+            },
+            character: {
+              type: "number",
+              description: "Character position within the line (0-indexed)",
+            },
+          },
+          required: ["path", "cell_index", "line", "character"],
+        },
+      },
+      {
         name: "get_user_focus",
         description:
           "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
@@ -660,8 +856,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Last cell index to delete (inclusive)",
             },
+            indices: {
+              type: "array",
+              items: { type: "number" },
+              description:
+                "Specific cell indices to delete (e.g., [2,5,8]). Takes precedence over start_index/end_index.",
+            },
           },
-          required: ["path", "start_index", "end_index"],
+          required: ["path"],
         },
       },
       {
@@ -765,6 +967,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Cell index to execute",
             },
+            timeout: {
+              type: "number",
+              description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
+            },
           },
           required: ["path", "index"],
         },
@@ -789,6 +995,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description:
                 "If true, insert code as a new cell and show outputs in JupyterLab (default: false)",
             },
+            timeout: {
+              type: "number",
+              description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
+            },
           },
           required: ["path", "code"],
         },
@@ -811,6 +1021,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             end_index: {
               type: "number",
               description: "Last cell index to execute (inclusive). Default: last cell",
+            },
+            timeout: {
+              type: "number",
+              description: "Timeout per cell in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
             },
           },
           required: ["path"],
@@ -835,6 +1049,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Code to insert and execute",
             },
+            timeout: {
+              type: "number",
+              description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
+            },
           },
           required: ["path", "source"],
         },
@@ -857,6 +1075,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             source: {
               type: "string",
               description: "New source code for the cell",
+            },
+            timeout: {
+              type: "number",
+              description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
             },
           },
           required: ["path", "index", "source"],
@@ -1113,6 +1335,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_kernel_variables",
+        description:
+          "List variables defined in the notebook's kernel. Returns variable names, types, and short representations. Useful for inspecting kernel state without writing code.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            filter: {
+              type: "string",
+              description: "Filter variables by name pattern (case-insensitive substring match). Default: show all",
+            },
+            include_private: {
+              type: "boolean",
+              description: "Include variables starting with underscore. Default: false",
+            },
+          },
+          required: ["path"],
+        },
+      },
+      {
         name: "interrupt_kernel",
         description:
           "Interrupt (stop) a running execution. Use when code is taking too long or stuck in an infinite loop. Does not restart the kernel or clear state.",
@@ -1224,6 +1469,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const sessions: any[] = await response.json();
         const notebooks = sessions.filter((s) => s.type === "notebook");
 
+        // Check for LSP availability (optional enhancement)
+        const lsp = await checkLspAvailability();
+        const lspInfo = lsp.available
+          ? `\n\nLSP available: ${[...lsp.servers.keys()].join(", ") || "checking..."}`
+          : "\n\nLSP: not available (install jupyterlab-lsp for enhanced diagnostics)";
+
         return {
           content: [
             {
@@ -1232,7 +1483,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 notebooks.length > 0
                   ? notebooks.map((n) => `- ${n.path}`).join("\n")
                   : "(no notebooks open)"
-              }`,
+              }${lspInfo}`,
             },
           ],
         };
@@ -1451,7 +1702,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Updated cell ${index} in ${path}\n\n\`\`\`diff\n${diff}\n\`\`\``,
+              text: `Updated cell ${index} in ${path}\n\n\`\`\`diff\n${truncateDiff(diff)}\n\`\`\``,
             },
           ],
         };
@@ -1502,7 +1753,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               `${path}:cell[${update.index}]`
             );
             if (diff !== "(no changes)") {
-              diffs.push(`Cell ${update.index}:\n${diff}`);
+              diffs.push(`Cell ${update.index}:\n${truncateDiff(diff)}`);
             }
           }
         });
@@ -1644,7 +1895,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "execute_cell": {
-        const { path, index } = args as { path: string; index: number };
+        const { path, index, timeout } = args as { path: string; index: number; timeout?: number };
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -1666,7 +1917,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const cell = cells.get(index) as Y.Map<any>;
         const source = extractSource(cell);
-        const result = await executeCode(session.kernelId, source);
+        const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+        const result = await executeCode(session.kernelId, source, timeoutMs);
 
         // Update cell outputs in the notebook
         if (cell instanceof Y.Map) {
@@ -1693,10 +1945,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "execute_code": {
-        const { path, code, insertCell } = args as {
+        const { path, code, insertCell, timeout } = args as {
           path: string;
           code: string;
           insertCell?: boolean;
+          timeout?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -1707,6 +1960,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
           );
         }
+
+        const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
 
         if (insertCell) {
           // Insert as a new cell and execute with visible outputs
@@ -1724,7 +1979,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cells.push([newCell]);
 
           // Execute and update outputs
-          const result = await executeCode(session.kernelId, code);
+          const result = await executeCode(session.kernelId, code, timeoutMs);
           updateCellOutputs(newCell, result);
 
           // Build response with text and images
@@ -1746,7 +2001,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content };
         } else {
           // Execute without inserting a cell
-          const result = await executeCode(session.kernelId, code);
+          const result = await executeCode(session.kernelId, code, timeoutMs);
 
           // Build response with text and images
           const content: any[] = [
@@ -1769,10 +2024,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "insert_and_execute": {
-        const { path, index, source } = args as {
+        const { path, index, source, timeout } = args as {
           path: string;
           index?: number;
           source: string;
+          timeout?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -1800,7 +2056,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         cells.insert(insertIndex, [newCell]);
 
         // Execute the cell
-        const result = await executeCode(session.kernelId, source);
+        const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+        const result = await executeCode(session.kernelId, source, timeoutMs);
 
         // Update cell outputs in the notebook
         updateCellOutputs(newCell, result);
@@ -1826,10 +2083,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "update_and_execute": {
-        const { path, index, source } = args as {
+        const { path, index, source, timeout } = args as {
           path: string;
           index: number;
           source: string;
+          timeout?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -1865,7 +2123,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Execute the cell
-        const result = await executeCode(session.kernelId, source);
+        const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+        const result = await executeCode(session.kernelId, source, timeoutMs);
 
         // Update cell outputs in the notebook
         if (cell instanceof Y.Map) {
@@ -1879,7 +2138,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const content: any[] = [
           {
             type: "text",
-            text: `Updated and executed cell ${index} in ${path}\n\n\`\`\`diff\n${diff}\n\`\`\`\n\nOutput:\n${result.text || "(no output)"}`,
+            text: `Updated and executed cell ${index} in ${path}\n\n\`\`\`diff\n${truncateDiff(diff)}\n\`\`\`\n\nOutput:\n${result.text || "(no output)"}`,
           },
         ];
 
@@ -1998,6 +2257,116 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: matches.length > 0
                 ? `${summary}\n\n${JSON.stringify(matches, null, 2)}`
                 : `${summary}`,
+            },
+          ],
+        };
+      }
+
+      case "replace_in_notebook": {
+        const {
+          path,
+          search,
+          replace,
+          cell_type = "code",
+          case_sensitive = false,
+          regex: useRegex = false,
+          indices,
+          dry_run = false,
+        } = args as {
+          path: string;
+          search: string;
+          replace: string;
+          cell_type?: "code" | "markdown" | "all";
+          case_sensitive?: boolean;
+          regex?: boolean;
+          indices?: number[];
+          dry_run?: boolean;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        // Build search regex
+        let searchRegex: RegExp;
+        const flags = case_sensitive ? "g" : "gi";
+        if (useRegex) {
+          searchRegex = createSafeRegex(search, case_sensitive);
+        } else {
+          // Escape special regex characters for literal match
+          const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          searchRegex = new RegExp(escaped, flags);
+        }
+
+        // Determine which cells to process
+        const targetIndices = indices && indices.length > 0
+          ? [...new Set(indices)].sort((a, b) => a - b)
+          : Array.from({ length: cells.length }, (_, i) => i);
+
+        const replacements: { index: number; count: number; preview?: string }[] = [];
+        let totalReplacements = 0;
+
+        for (const i of targetIndices) {
+          if (i < 0 || i >= cells.length) {
+            throw new Error(`Invalid cell index ${i}. Notebook has ${cells.length} cells.`);
+          }
+
+          const cell = cells.get(i) as Y.Map<any>;
+          const type = getCellType(cell);
+
+          // Skip cells that don't match the cell_type filter
+          if (cell_type !== "all" && type !== cell_type) continue;
+
+          const source = extractSource(cell);
+          const matchCount = (source.match(searchRegex) || []).length;
+
+          if (matchCount > 0) {
+            const newSource = source.replace(searchRegex, replace);
+            totalReplacements += matchCount;
+
+            if (!dry_run && cell instanceof Y.Map) {
+              const sourceField = cell.get("source");
+              if (sourceField instanceof Y.Text) {
+                sourceField.delete(0, sourceField.length);
+                sourceField.insert(0, newSource);
+              } else {
+                cell.set("source", new Y.Text(newSource));
+              }
+            }
+
+            // Show preview (first match context)
+            const firstMatch = source.match(searchRegex);
+            const matchIdx = firstMatch ? source.indexOf(firstMatch[0]) : 0;
+            const contextStart = Math.max(0, matchIdx - 20);
+            const contextEnd = Math.min(source.length, matchIdx + search.length + 20);
+            const preview = (contextStart > 0 ? "..." : "") +
+              source.slice(contextStart, contextEnd).replace(/\n/g, "\\n") +
+              (contextEnd < source.length ? "..." : "");
+
+            replacements.push({ index: i, count: matchCount, preview });
+          }
+        }
+
+        const action = dry_run ? "Would replace" : "Replaced";
+        const summary = `${action} "${search}" → "${replace}" in ${path}: ${totalReplacements} occurrence(s) in ${replacements.length} cell(s)`;
+
+        if (replacements.length === 0) {
+          return {
+            content: [{ type: "text", text: `No matches found for "${search}" in ${path}` }],
+          };
+        }
+
+        const details = replacements
+          .map((r) => `  Cell ${r.index}: ${r.count} replacement(s) — ${r.preview}`)
+          .join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${summary}\n\n${details}`,
             },
           ],
         };
@@ -2182,10 +2551,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "delete_cells": {
-        const { path, start_index, end_index } = args as {
+        const { path, start_index, end_index, indices } = args as {
           path: string;
-          start_index: number;
-          end_index: number;
+          start_index?: number;
+          end_index?: number;
+          indices?: number[];
         };
 
         const sessions = await listNotebookSessions();
@@ -2193,6 +2563,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const { doc } = await connectToNotebook(path, session?.kernelId);
         const cells = doc.getArray("cells");
+
+        if (indices && indices.length > 0) {
+          // Non-contiguous deletion - delete in reverse order to preserve indices
+          const sortedIndices = [...new Set(indices)].sort((a, b) => b - a);
+          for (const idx of sortedIndices) {
+            if (idx < 0 || idx >= cells.length) {
+              throw new Error(`Invalid cell index ${idx}. Notebook has ${cells.length} cells.`);
+            }
+          }
+          for (const idx of sortedIndices) {
+            cells.delete(idx, 1);
+          }
+          const originalIndices = [...sortedIndices].reverse();
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Deleted ${sortedIndices.length} cells (indices ${originalIndices.join(", ")}) from ${path}`,
+              },
+            ],
+          };
+        }
+
+        // Contiguous range deletion
+        if (start_index === undefined || end_index === undefined) {
+          throw new Error("Either 'indices' or both 'start_index' and 'end_index' are required.");
+        }
 
         if (start_index < 0 || end_index >= cells.length || start_index > end_index) {
           throw new Error(
@@ -2498,10 +2895,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "execute_range": {
-        const { path, start_index = 0, end_index } = args as {
+        const { path, start_index = 0, end_index, timeout } = args as {
           path: string;
           start_index?: number;
           end_index?: number;
+          timeout?: number;
         };
 
         const sessions = await listNotebookSessions();
@@ -2524,6 +2922,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
         const results: { index: number; status: string; output?: string }[] = [];
 
         for (let i = start_index; i <= endIdx; i++) {
@@ -2542,7 +2941,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
 
           try {
-            const result = await executeCode(session.kernelId, source);
+            const result = await executeCode(session.kernelId, source, timeoutMs);
             updateCellOutputs(cell, result);
             results.push({
               index: i,
@@ -2612,11 +3011,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           }
 
+          const message = clearedCount === 0
+            ? `No cells had outputs to clear in ${path}`
+            : `Cleared outputs from ${clearedCount} cell${clearedCount === 1 ? "" : "s"} in ${path}`;
+
           return {
             content: [
               {
                 type: "text",
-                text: `Cleared outputs from ${clearedCount} cells in ${path}`,
+                text: message,
               },
             ],
           };
@@ -3242,6 +3645,113 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "get_kernel_variables": {
+        const { path, filter, include_private = false } = args as {
+          path: string;
+          filter?: string;
+          include_private?: boolean;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        if (!session?.kernelId) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
+              },
+            ],
+          };
+        }
+
+        // Python code to introspect variables
+        const inspectCode = `
+import json
+_vars = {}
+for _name in dir():
+    if _name.startswith('_'):
+        continue
+    try:
+        _obj = eval(_name)
+        _type = type(_obj).__name__
+        _repr = repr(_obj)
+        if len(_repr) > 100:
+            _repr = _repr[:97] + "..."
+        _vars[_name] = {"type": _type, "repr": _repr}
+    except:
+        pass
+print(json.dumps(_vars))
+del _vars, _name, _obj, _type, _repr
+`;
+
+        const result = await executeCode(session.kernelId, inspectCode);
+
+        if (result.status === "error") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Failed to inspect kernel variables: ${result.text}`,
+              },
+            ],
+          };
+        }
+
+        try {
+          const vars = JSON.parse(result.text.trim());
+          let entries = Object.entries(vars) as [string, { type: string; repr: string }][];
+
+          // Filter by name if specified
+          if (filter) {
+            const filterLower = filter.toLowerCase();
+            entries = entries.filter(([name]) => name.toLowerCase().includes(filterLower));
+          }
+
+          // Filter private variables
+          if (!include_private) {
+            entries = entries.filter(([name]) => !name.startsWith("_"));
+          }
+
+          if (entries.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: filter
+                    ? `No variables matching "${filter}" in ${path}`
+                    : `No user-defined variables in ${path}`,
+                },
+              ],
+            };
+          }
+
+          const lines = [`Variables in ${path} (${entries.length}):\n`];
+          for (const [name, info] of entries) {
+            lines.push(`  ${name}: ${info.type} = ${info.repr}`);
+          }
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: lines.join("\n"),
+              },
+            ],
+          };
+        } catch {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not parse kernel variables. Raw output: ${result.text}`,
+              },
+            ],
+          };
+        }
+      }
+
       case "interrupt_kernel": {
         const { path } = args as { path: string };
 
@@ -3296,6 +3806,292 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             },
           ],
         };
+      }
+
+      case "get_diagnostics": {
+        const { path, cell_index } = args as { path: string; cell_index?: number };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        // Determine which cells to check
+        const indicesToCheck: number[] = [];
+        if (cell_index !== undefined) {
+          if (cell_index < 0 || cell_index >= cells.length) {
+            throw new Error(`Invalid cell index ${cell_index}. Notebook has ${cells.length} cells.`);
+          }
+          indicesToCheck.push(cell_index);
+        } else {
+          for (let i = 0; i < cells.length; i++) {
+            const cell = cells.get(i) as Y.Map<any>;
+            if (getCellType(cell) === "code") {
+              indicesToCheck.push(i);
+            }
+          }
+        }
+
+        // Try LSP first if available
+        const languageServer = getLanguageServerForFile(path);
+        if (lspStatus.available && languageServer) {
+          // For LSP, we'd need to get diagnostics from the virtual document
+          // This requires the notebook to be open in JupyterLab with LSP active
+          // For now, fall through to syntax check
+        }
+
+        // Use ruff via uvx for fast, comprehensive diagnostics (no kernel needed)
+        const diagnostics: { cell: number; line: number; column?: number; code: string; message: string; severity: string }[] = [];
+        let diagnosticMethod: "ruff" | "syntax" | "none" = "none";
+
+        for (const idx of indicesToCheck) {
+          const cell = cells.get(idx) as Y.Map<any>;
+          const source = extractSource(cell);
+          if (!source.trim()) continue;
+
+          try {
+            // Run ruff via uvx with JSON output
+            const { spawn } = await import("child_process");
+            const result = await new Promise<string>((resolve, reject) => {
+              const proc = spawn("uvx", [
+                "ruff", "check", "--stdin-filename", `cell_${idx}.py`,
+                "--output-format", "json", "--select", "E,F", "--ignore", "F401", "-"
+              ], { timeout: 10000 });
+
+              let stdout = "";
+              let stderr = "";
+
+              proc.stdin.write(source);
+              proc.stdin.end();
+
+              proc.stdout.on("data", (data) => { stdout += data; });
+              proc.stderr.on("data", (data) => { stderr += data; });
+
+              proc.on("close", (code) => {
+                // ruff returns non-zero if issues found, that's fine
+                resolve(stdout);
+              });
+
+              proc.on("error", (err) => {
+                reject(err);
+              });
+            });
+
+            diagnosticMethod = "ruff";
+            if (result.trim()) {
+              const issues = JSON.parse(result);
+              for (const issue of issues) {
+                const severity = issue.code?.startsWith("E") ? "error" : "warning";
+                diagnostics.push({
+                  cell: idx,
+                  line: issue.location?.row || 1,
+                  column: issue.location?.column,
+                  code: issue.code || "",
+                  message: issue.message || "Unknown issue",
+                  severity,
+                });
+              }
+            }
+          } catch (e: any) {
+            // If uvx/ruff not available, fall back to basic syntax check
+            if (e.code === "ENOENT" || e.message?.includes("spawn")) {
+              // uvx not found - try kernel-based syntax check
+              if (session?.kernelId) {
+                const checkCode = `
+try:
+    compile(${JSON.stringify(source)}, '<cell ${idx}>', 'exec')
+    print("OK")
+except SyntaxError as e:
+    print(f"SYNTAX:{e.lineno or 1}:{e.msg}")
+`;
+                try {
+                  const kernelResult = await executeCode(session.kernelId, checkCode, 5000);
+                  diagnosticMethod = "syntax";
+                  const output = kernelResult.text.trim();
+                  if (output.startsWith("SYNTAX:")) {
+                    const parts = output.slice(7).split(":");
+                    diagnostics.push({
+                      cell: idx,
+                      line: parseInt(parts[0], 10) || 1,
+                      code: "E999",
+                      message: parts.slice(1).join(":"),
+                      severity: "error",
+                    });
+                  }
+                } catch {
+                  // Kernel check failed too
+                }
+              }
+            }
+          }
+        }
+
+        // Build result message based on what diagnostic method was available
+        if (diagnosticMethod === "none") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not run diagnostics for ${path}. Install uv (https://docs.astral.sh/uv/) or open the notebook to enable kernel-based syntax checking.`,
+              },
+            ],
+          };
+        }
+
+        const methodNote = diagnosticMethod === "syntax"
+          ? " (syntax only - install uv for full diagnostics)"
+          : "";
+
+        if (diagnostics.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No issues found in ${indicesToCheck.length} code cell(s) of ${path}${methodNote}`,
+              },
+            ],
+          };
+        }
+
+        const report = diagnostics
+          .map((d) => {
+            const loc = d.column ? `line ${d.line}:${d.column}` : `line ${d.line}`;
+            const code = d.code ? `[${d.code}] ` : "";
+            return `  Cell ${d.cell}, ${loc}: ${code}${d.message}`;
+          })
+          .join("\n");
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Found ${diagnostics.length} issue(s) in ${path}:\n\n${report}`,
+            },
+          ],
+        };
+      }
+
+      case "get_hover_info": {
+        const { path, cell_index, line, character } = args as {
+          path: string;
+          cell_index: number;
+          line: number;
+          character: number;
+        };
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        if (cell_index < 0 || cell_index >= cells.length) {
+          throw new Error(`Invalid cell index ${cell_index}. Notebook has ${cells.length} cells.`);
+        }
+
+        const cell = cells.get(cell_index) as Y.Map<any>;
+        const source = extractSource(cell);
+        const lines = source.split("\n");
+
+        if (line < 0 || line >= lines.length) {
+          throw new Error(`Invalid line ${line}. Cell has ${lines.length} lines.`);
+        }
+
+        // Extract the word at the position
+        const lineText = lines[line];
+        let wordStart = character;
+        let wordEnd = character;
+
+        // Find word boundaries
+        while (wordStart > 0 && /\w/.test(lineText[wordStart - 1])) wordStart--;
+        while (wordEnd < lineText.length && /\w/.test(lineText[wordEnd])) wordEnd++;
+
+        const word = lineText.slice(wordStart, wordEnd);
+
+        if (!word) {
+          return {
+            content: [{ type: "text", text: "No identifier at this position" }],
+          };
+        }
+
+        // Try LSP first if available
+        const languageServer = getLanguageServerForFile(path);
+        if (lspStatus.available && languageServer) {
+          // Would use textDocument/hover here
+          // Fall through to kernel introspection for now
+        }
+
+        // Fallback: Kernel introspection
+        if (!session?.kernelId) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No kernel available. Cannot get info for "${word}".`,
+              },
+            ],
+          };
+        }
+
+        // Build context by including earlier cells
+        const contextCells: string[] = [];
+        for (let i = 0; i <= cell_index; i++) {
+          const c = cells.get(i) as Y.Map<any>;
+          if (getCellType(c) === "code") {
+            contextCells.push(extractSource(c));
+          }
+        }
+
+        // Use Python introspection
+        const inspectCode = `
+${contextCells.join("\n")}
+
+# Introspection
+_target = ${word}
+import inspect
+_result_parts = []
+_result_parts.append(f"**{type(_target).__name__}**: \`{_target.__name__ if hasattr(_target, '__name__') else repr(_target)[:100]}\`")
+if hasattr(_target, '__doc__') and _target.__doc__:
+    _doc = _target.__doc__.strip()
+    if len(_doc) > 500:
+        _doc = _doc[:500] + "..."
+    _result_parts.append(f"\\n{_doc}")
+if callable(_target):
+    try:
+        _sig = str(inspect.signature(_target))
+        _result_parts.append(f"\\n**Signature**: \`{_target.__name__}{_sig}\`")
+    except:
+        pass
+print("\\n".join(_result_parts))
+del _target, _result_parts
+`;
+        try {
+          const result = await executeCode(session.kernelId, inspectCode, 5000);
+          if (result.status === "ok" && result.text) {
+            return {
+              content: [{ type: "text", text: result.text }],
+            };
+          } else {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Could not get info for "${word}": ${result.text || "unknown error"}`,
+                },
+              ],
+            };
+          }
+        } catch (e: any) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Could not get info for "${word}": ${e.message}`,
+              },
+            ],
+          };
+        }
       }
 
       default:

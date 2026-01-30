@@ -370,3 +370,24 @@ export function extractOutputsWithTraceback(outputs: any[]): string {
   }
   return parts.join("\n");
 }
+
+/**
+ * Truncate a diff string if it exceeds maxLines.
+ * Shows first and last portions with a "... X lines omitted ..." message.
+ */
+export function truncateDiff(diff: string, maxLines: number = 30): string {
+  const lines = diff.split("\n");
+  if (lines.length <= maxLines) {
+    return diff;
+  }
+
+  const keepTop = Math.floor(maxLines / 2);
+  const keepBottom = maxLines - keepTop;
+  const omitted = lines.length - maxLines;
+
+  return [
+    ...lines.slice(0, keepTop),
+    `... ${omitted} lines omitted ...`,
+    ...lines.slice(-keepBottom),
+  ].join("\n");
+}

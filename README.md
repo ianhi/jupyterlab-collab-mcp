@@ -8,14 +8,43 @@ An MCP server that connects Claude Code to JupyterLab notebooks in real-time. Ch
 
 - **Real-time sync**: See changes appear instantly in JupyterLab
 - **Kernel execution**: Run code and see outputs in the notebook
+- **Code diagnostics**: Detect errors without execution (via `ruff`)
 - **Context-efficient**: Filter by cell type, skip outputs, read ranges
 - **No extension needed**: Uses JupyterLab's built-in collaboration system
+
+## Quick Start with `jupyter-claude`
+
+The easiest way to launch JupyterLab with all the right extensions:
+
+```bash
+# Add to your PATH (one-time setup)
+export PATH="/path/to/jupyterlab-claude-code/bin:$PATH"
+
+# Then from any directory:
+jupyter-claude
+```
+
+This command auto-detects your environment:
+
+| Directory Type | Behavior |
+|----------------|----------|
+| Has `pyproject.toml` | Installs local package + deps + Claude Code extras |
+| Has `pixi.toml` | Uses `pixi run` (add extras to pixi.toml) |
+| Neither | Standalone mode with all extras included |
+
+**Extras added automatically** (without modifying your project):
+- `jupyter-collaboration` - real-time sync for Claude Code
+- `jupyter-lsp` + `python-lsp-server` - diagnostics and hover info
+- `jupyterlab-vim` - vim keybindings
+
+Requires [uv](https://docs.astral.sh/uv/) to be installed.
 
 ## Prerequisites
 
 - JupyterLab 4.x with `jupyter-collaboration` installed
 - Node.js 18+
 - Claude Code
+- [uv](https://docs.astral.sh/uv/) (optional, for `jupyter-claude` launcher and enhanced diagnostics)
 
 ```bash
 # Install jupyter-collaboration if needed
@@ -52,6 +81,9 @@ No token in config - just paste your JupyterLab URL when connecting.
 | `get_notebook_content` | Get cells with filtering options |
 | `get_notebook_outline` | Get condensed structure (headers + first lines) |
 | `search_notebook` | Search/grep through source code and outputs |
+| `replace_in_notebook` | Search and replace across cells (refactoring) |
+| `get_diagnostics` | Get errors/warnings without execution (via ruff) |
+| `get_hover_info` | Get documentation/type info at a position |
 | `insert_cell` | Insert a new cell at position |
 | `insert_and_execute` | Insert a cell and run it in one operation |
 | `update_cell` | Update cell source code |
@@ -75,6 +107,7 @@ No token in config - just paste your JupyterLab URL when connecting.
 | `rename_notebook` | Rename a notebook file |
 | `diff_notebooks` | Compare two notebooks cell by cell |
 | `get_kernel_status` | Check if kernel is idle/busy/dead |
+| `get_kernel_variables` | List variables defined in the kernel |
 | `interrupt_kernel` | Stop running execution |
 | `restart_kernel` | Restart kernel (clears all state) |
 

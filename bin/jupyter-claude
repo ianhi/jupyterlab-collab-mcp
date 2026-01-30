@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Launch JupyterLab with Claude Code collaboration support
+# Usage: jupyter-claude [jupyter lab args...]
+#
+# Automatically detects your environment:
+# - In a uv project (pyproject.toml): installs local package + deps + extras
+# - In a pixi project: uses pixi run (add extras to pixi.toml manually)
+# - Standalone: uses uvx with all extras included
+#
+# Extras added (without modifying your project):
+# - jupyter-collaboration (real-time sync for Claude Code)
+# - jupyter-lsp + python-lsp-server (diagnostics/hover)
+# - jupyterlab-vim (vim keybindings)
+
+set -e
+
+PORT="${JUPYTER_PORT:-8888}"
+
+# Check if --port was passed in args
+if [[ ! "$*" =~ --port ]]; then
+    PORT_ARG="--port $PORT"
+else
+    PORT_ARG=""
+fi
+
+EXTRAS=(
+    jupyterlab
+    jupyter-collaboration
+    jupyter-lsp
+    python-lsp-server
+    jupyterlab-vim
+)
+
+# Build --with args
+WITH_ARGS=""
+for pkg in "${EXTRAS[@]}"; do
+    WITH_ARGS="$WITH_ARGS --with $pkg"
+done
+
+# Detect environment and launch appropriately
+if [[ -f "pixi.toml" ]] || [[ -f "pixi.lock" ]]; then
+    echo "📦 Pixi project detected"
+    echo "   Note: Add to pixi.toml for full support: ${EXTRAS[*]}"
+    exec pixi run jupyter-lab $PORT_ARG "$@"
+
+elif [[ -f "pyproject.toml" ]]; then
+    echo "📦 Python project detected - installing local package + Claude Code extras..."
+    exec uv run $WITH_ARGS jupyter-lab $PORT_ARG "$@"
+
+else
+    echo "📓 Standalone mode - launching JupyterLab with Claude Code extras..."
+    exec uvx --from jupyterlab $WITH_ARGS jupyter-lab $PORT_ARG "$@"
+fi

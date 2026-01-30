@@ -14,6 +14,7 @@ import {
   extractMarkdownHeaders,
   getCodePreview,
   extractOutputsWithTraceback,
+  truncateDiff,
   type ExecutionResult,
 } from "./helpers.js";
 
@@ -790,5 +791,51 @@ describe("extractOutputsWithTraceback", () => {
       evalue: "message",
     }];
     expect(extractOutputsWithTraceback(outputs)).toBe("Error: message");
+  });
+});
+
+describe("truncateDiff", () => {
+  it("returns unchanged diff if within maxLines", () => {
+    const diff = "line1\nline2\nline3";
+    expect(truncateDiff(diff, 10)).toBe(diff);
+  });
+
+  it("truncates diff that exceeds maxLines", () => {
+    const lines = Array.from({ length: 50 }, (_, i) => `line${i + 1}`);
+    const diff = lines.join("\n");
+    const result = truncateDiff(diff, 10);
+
+    // Should have first 5 lines, omission message, last 5 lines
+    expect(result).toContain("line1");
+    expect(result).toContain("line5");
+    expect(result).toContain("... 40 lines omitted ...");
+    expect(result).toContain("line46");
+    expect(result).toContain("line50");
+    expect(result).not.toContain("line25");
+  });
+
+  it("uses default maxLines of 30", () => {
+    const lines = Array.from({ length: 40 }, (_, i) => `line${i + 1}`);
+    const diff = lines.join("\n");
+    const result = truncateDiff(diff);
+
+    expect(result).toContain("... 10 lines omitted ...");
+  });
+
+  it("handles exact maxLines boundary", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line${i + 1}`);
+    const diff = lines.join("\n");
+    const result = truncateDiff(diff, 30);
+
+    // Should not truncate
+    expect(result).toBe(diff);
+  });
+
+  it("handles one line over maxLines", () => {
+    const lines = Array.from({ length: 31 }, (_, i) => `line${i + 1}`);
+    const diff = lines.join("\n");
+    const result = truncateDiff(diff, 30);
+
+    expect(result).toContain("... 1 lines omitted ...");
   });
 });
