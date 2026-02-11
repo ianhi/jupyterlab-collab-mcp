@@ -86,6 +86,12 @@ import {
   restoreSnapshotToFs,
   diffSnapshot,
 } from "./snapshots.js";
+import {
+  acquireLocks,
+  releaseLocks,
+  listLocks as listLocksForPath,
+  checkLock,
+} from "./cell-locks.js";
 import { readdir, stat, rename as fsRename } from "fs/promises";
 import { join, resolve as pathResolve } from "path";
 
@@ -510,6 +516,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const cell = cells.get(resolvedIndex) as Y.Map<any>;
 
+        // Check advisory lock
+        if (!force) {
+          const fullCellId = getCellId(cell) || "";
+          if (fullCellId) {
+            const lock = checkLock(path, fullCellId, "claude-code");
+            if (lock) {
+              const cellIdStr = truncatedCellId(cell);
+              throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+            }
+          }
+        }
+
         // Capture old source for diff
         const oldSource = extractSource(cell);
 
@@ -720,6 +738,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Capture source before deleting
         const cell = cells.get(resolvedIndex) as Y.Map<any>;
+
+        // Check advisory lock
+        if (!force) {
+          const fullCellId = getCellId(cell) || "";
+          if (fullCellId) {
+            const lock = checkLock(path, fullCellId, "claude-code");
+            if (lock) {
+              const cellIdStr = truncatedCellId(cell);
+              throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+            }
+          }
+        }
+
         const oldSource = extractSource(cell);
         const cellType = getCellType(cell);
         const cellIdStr = truncatedCellId(cell);
@@ -1787,12 +1818,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "copy_cells": {
-        const { source_path, dest_path, start_index, end_index, dest_index } = args as {
+        const { source_path, dest_path, start_index, end_index, cell_ids: copyCellIds, dest_index, dest_cell_id } = args as {
           source_path: string;
           dest_path: string;
-          start_index: number;
-          end_index: number;
+          start_index?: number;
+          end_index?: number;
+          cell_ids?: string[];
           dest_index?: number;
+          dest_cell_id?: string;
         };
 
         if (!isJupyterConnected()) {
@@ -1801,16 +1834,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const srcNb = await readNotebook(resolvedSrc);
           const destNb = resolvedSrc === resolvedDest ? srcNb : await readNotebook(resolvedDest);
 
-          if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
-            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+          // Resolve source indices
+          let sourceIndices: number[];
+          if (copyCellIds && copyCellIds.length > 0) {
+            sourceIndices = resolveCellIds(srcNb.cells, copyCellIds);
+          } else if (start_index !== undefined && end_index !== undefined) {
+            if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
+              throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+            }
+            sourceIndices = [];
+            for (let i = start_index; i <= end_index; i++) sourceIndices.push(i);
+          } else {
+            throw new Error("Specify 'cell_ids' or both 'start_index' and 'end_index'.");
           }
 
-          const insertAt = dest_index ?? destNb.cells.length;
-          const count = end_index - start_index + 1;
+          // Resolve destination
+          let insertAt: number;
+          if (dest_cell_id !== undefined) {
+            insertAt = resolveCellId(destNb.cells, dest_cell_id) + 1;
+          } else {
+            insertAt = dest_index ?? destNb.cells.length;
+          }
 
           // Deep copy cells
           const copiedCells: NotebookCell[] = [];
-          for (let i = start_index; i <= end_index; i++) {
+          for (const i of sourceIndices) {
             const src = srcNb.cells[i];
             const cellType = src.cell_type || "code";
             const newCell: NotebookCell = {
@@ -1831,8 +1879,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             return `  [${insertAt + i}] ${cell.cell_type}: ${preview}`;
           });
 
+          const rangeLabel = copyCellIds ? `${copyCellIds.length} cells by ID` : `[${start_index}:${end_index}]`;
           return {
-            content: [{ type: "text", text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}` }],
+            content: [{ type: "text", text: `Copied ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}` }],
           };
         }
 
@@ -1843,42 +1892,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc: sourceDoc } = await connectToNotebook(source_path, sourceSession?.kernelId);
         const sourceCells = sourceDoc.getArray("cells");
 
-        if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
-          throw new Error(
-            `Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`
-          );
+        // Resolve source indices
+        let sourceIndices: number[];
+        if (copyCellIds && copyCellIds.length > 0) {
+          sourceIndices = resolveCellIds(sourceCells, copyCellIds);
+        } else if (start_index !== undefined && end_index !== undefined) {
+          if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
+            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`);
+          }
+          sourceIndices = [];
+          for (let i = start_index; i <= end_index; i++) sourceIndices.push(i);
+        } else {
+          throw new Error("Specify 'cell_ids' or both 'start_index' and 'end_index'.");
         }
 
         const { doc: destDoc } = await connectToNotebook(dest_path, destSession?.kernelId);
         const destCells = destDoc.getArray("cells");
 
-        const insertAt = dest_index ?? destCells.length;
+        // Resolve destination
+        let insertAt: number;
+        if (dest_cell_id !== undefined) {
+          insertAt = resolveCellId(destCells, dest_cell_id) + 1;
+        } else {
+          insertAt = dest_index ?? destCells.length;
+        }
 
         // Copy cells
         const copiedCells: Y.Map<any>[] = [];
-        for (let i = start_index; i <= end_index; i++) {
+        for (const i of sourceIndices) {
           const sourceCell = sourceCells.get(i) as Y.Map<any>;
-
-          // Create new cell with copied content
           const newCell = new Y.Map();
           const cellType = sourceCell.get("cell_type") || "code";
           newCell.set("cell_type", cellType);
           newCell.set("source", new Y.Text(extractSource(sourceCell)));
           newCell.set("metadata", new Y.Map());
           newCell.set("id", crypto.randomUUID());
-
           if (cellType === "code") {
             newCell.set("outputs", new Y.Array());
             newCell.set("execution_count", null);
           }
-
           copiedCells.push(newCell);
         }
 
         destCells.insert(insertAt, copiedCells);
 
-        const count = end_index - start_index + 1;
-        // Build summary of what was copied
         const cellSummaries: string[] = [];
         for (let i = 0; i < copiedCells.length; i++) {
           const cell = copiedCells[i];
@@ -1888,23 +1945,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellSummaries.push(`  [${insertAt + i}] ${type}: ${preview}`);
         }
 
+        const rangeLabel = copyCellIds ? `${copyCellIds.length} cells by ID` : `[${start_index}:${end_index}]`;
         return {
           content: [
             {
               type: "text",
-              text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}`,
+              text: `Copied ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}`,
             },
           ],
         };
       }
 
       case "move_cells": {
-        const { source_path, dest_path, start_index, end_index, dest_index } = args as {
+        const { source_path, dest_path, start_index, end_index, cell_ids: moveCellIds, dest_index, dest_cell_id } = args as {
           source_path: string;
           dest_path: string;
-          start_index: number;
-          end_index: number;
-          dest_index: number;
+          start_index?: number;
+          end_index?: number;
+          cell_ids?: string[];
+          dest_index?: number;
+          dest_cell_id?: string;
         };
 
         if (!isJupyterConnected()) {
@@ -1914,15 +1974,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const sameNotebook = resolvedSrc === resolvedDest;
           const destNb = sameNotebook ? srcNb : await readNotebook(resolvedDest);
 
-          if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
-            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+          // Resolve source indices
+          let sourceIndices: number[];
+          if (moveCellIds && moveCellIds.length > 0) {
+            sourceIndices = resolveCellIds(srcNb.cells, moveCellIds);
+          } else if (start_index !== undefined && end_index !== undefined) {
+            if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
+              throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+            }
+            sourceIndices = [];
+            for (let i = start_index; i <= end_index; i++) sourceIndices.push(i);
+          } else {
+            throw new Error("Specify 'cell_ids' or both 'start_index' and 'end_index'.");
           }
 
-          const count = end_index - start_index + 1;
+          // Resolve destination
+          let resolvedDest_index: number;
+          if (dest_cell_id !== undefined) {
+            resolvedDest_index = resolveCellId(destNb.cells, dest_cell_id) + 1;
+          } else if (dest_index !== undefined) {
+            resolvedDest_index = dest_index;
+          } else {
+            throw new Error("Specify 'dest_index' or 'dest_cell_id'.");
+          }
 
-          // Copy cells content
+          const count = sourceIndices.length;
+
+          // Copy cells content (before deleting)
           const cellsToMove: NotebookCell[] = [];
-          for (let i = start_index; i <= end_index; i++) {
+          for (const i of sourceIndices) {
             const src = srcNb.cells[i];
             const cellType = src.cell_type || "code";
             cellsToMove.push({
@@ -1934,38 +2014,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             });
           }
 
-          if (sameNotebook) {
-            srcNb.cells.splice(start_index, count);
-            let adjustedDest = dest_index;
-            if (dest_index > start_index) {
-              adjustedDest = Math.max(0, dest_index - count);
-            }
-            srcNb.cells.splice(adjustedDest, 0, ...cellsToMove);
-            await writeNotebook(resolvedSrc, srcNb);
-
-            const cellSummaries = cellsToMove.map((cell, i) => {
-              const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
-              return `  [${adjustedDest + i}] ${cell.cell_type}: ${preview}`;
-            });
-
-            return {
-              content: [{ type: "text", text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}:\n${cellSummaries.join("\n")}` }],
-            };
-          } else {
-            destNb.cells.splice(dest_index, 0, ...cellsToMove);
-            srcNb.cells.splice(start_index, count);
-            await writeNotebook(resolvedSrc, srcNb);
-            await writeNotebook(resolvedDest, destNb);
-
-            const cellSummaries = cellsToMove.map((cell, i) => {
-              const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
-              return `  [${dest_index + i}] ${cell.cell_type}: ${preview}`;
-            });
-
-            return {
-              content: [{ type: "text", text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}:\n${cellSummaries.join("\n")}` }],
-            };
+          // Delete from source (reverse order to preserve indices)
+          for (let i = sourceIndices.length - 1; i >= 0; i--) {
+            srcNb.cells.splice(sourceIndices[i], 1);
           }
+
+          // Adjust dest for same-notebook case
+          let adjustedDest = resolvedDest_index;
+          if (sameNotebook) {
+            // Count how many deleted cells were before the destination
+            const deletedBefore = sourceIndices.filter((i) => i < resolvedDest_index).length;
+            adjustedDest = Math.max(0, resolvedDest_index - deletedBefore);
+          }
+
+          destNb.cells.splice(adjustedDest, 0, ...cellsToMove);
+
+          await writeNotebook(resolvedSrc, srcNb);
+          if (!sameNotebook) await writeNotebook(resolvedDest, destNb);
+
+          const cellSummaries = cellsToMove.map((cell, i) => {
+            const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
+            return `  [${adjustedDest + i}] ${cell.cell_type}: ${preview}`;
+          });
+
+          const rangeLabel = moveCellIds ? `${count} cells by ID` : `indices ${start_index}-${end_index}`;
+          const destLabel = sameNotebook ? `index ${adjustedDest} in ${source_path}` : `${dest_path} at index ${adjustedDest}`;
+          return {
+            content: [{ type: "text", text: `Moved ${count} cell(s) from ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}` }],
+          };
         }
 
         const sessions = await listNotebookSessions();
@@ -1975,18 +2051,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc: sourceDoc } = await connectToNotebook(source_path, sourceSession?.kernelId);
         const sourceCells = sourceDoc.getArray("cells");
 
-        if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
-          throw new Error(
-            `Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`
-          );
+        // Resolve source indices
+        let sourceIndices: number[];
+        if (moveCellIds && moveCellIds.length > 0) {
+          sourceIndices = resolveCellIds(sourceCells, moveCellIds);
+        } else if (start_index !== undefined && end_index !== undefined) {
+          if (start_index < 0 || end_index >= sourceCells.length || start_index > end_index) {
+            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${sourceCells.length} cells.`);
+          }
+          sourceIndices = [];
+          for (let i = start_index; i <= end_index; i++) sourceIndices.push(i);
+        } else {
+          throw new Error("Specify 'cell_ids' or both 'start_index' and 'end_index'.");
         }
 
         const sameNotebook = source_path === dest_path;
-        const count = end_index - start_index + 1;
+        const count = sourceIndices.length;
 
-        // Collect cells to move (need to copy content before deleting)
+        // Collect cells to move (copy content before deleting)
         const cellsToMove: Y.Map<any>[] = [];
-        for (let i = start_index; i <= end_index; i++) {
+        for (const i of sourceIndices) {
           const sourceCell = sourceCells.get(i) as Y.Map<any>;
           const newCell = new Y.Map();
           const cellType = sourceCell.get("cell_type") || "code";
@@ -2002,19 +2086,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (sameNotebook) {
-          // Moving within same notebook - need to handle index adjustment
-          // Delete first, then insert (adjusting dest_index if needed)
-          sourceCells.delete(start_index, count);
-
-          // Adjust destination index if it was after the deleted range
-          let adjustedDest = dest_index;
-          if (dest_index > start_index) {
-            adjustedDest = Math.max(0, dest_index - count);
+          // Resolve destination
+          let resolvedDest_idx: number;
+          if (dest_cell_id !== undefined) {
+            resolvedDest_idx = resolveCellId(sourceCells, dest_cell_id) + 1;
+          } else if (dest_index !== undefined) {
+            resolvedDest_idx = dest_index;
+          } else {
+            throw new Error("Specify 'dest_index' or 'dest_cell_id'.");
           }
+
+          // Delete from source (reverse order)
+          for (let i = sourceIndices.length - 1; i >= 0; i--) {
+            sourceCells.delete(sourceIndices[i], 1);
+          }
+
+          // Adjust dest
+          const deletedBefore = sourceIndices.filter((si) => si < resolvedDest_idx).length;
+          const adjustedDest = Math.max(0, resolvedDest_idx - deletedBefore);
 
           sourceCells.insert(adjustedDest, cellsToMove);
 
-          // Build summary of what was moved
           const cellSummaries: string[] = [];
           for (let i = 0; i < cellsToMove.length; i++) {
             const cell = cellsToMove[i];
@@ -2024,42 +2116,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellSummaries.push(`  [${adjustedDest + i}] ${type}: ${preview}`);
           }
 
+          const rangeLabel = moveCellIds ? `${count} cells by ID` : `indices ${start_index}-${end_index}`;
           return {
-            content: [
-              {
-                type: "text",
-                text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}:\n${cellSummaries.join("\n")}`,
-              },
-            ],
+            content: [{ type: "text", text: `Moved ${count} cell(s) from ${rangeLabel} to index ${adjustedDest} in ${source_path}:\n${cellSummaries.join("\n")}` }],
           };
         } else {
           // Moving between notebooks
           const { doc: destDoc } = await connectToNotebook(dest_path, destSession?.kernelId);
           const destCells = destDoc.getArray("cells");
 
+          // Resolve destination
+          let resolvedDest_idx: number;
+          if (dest_cell_id !== undefined) {
+            resolvedDest_idx = resolveCellId(destCells, dest_cell_id) + 1;
+          } else if (dest_index !== undefined) {
+            resolvedDest_idx = dest_index;
+          } else {
+            throw new Error("Specify 'dest_index' or 'dest_cell_id'.");
+          }
+
           // Insert into destination
-          destCells.insert(dest_index, cellsToMove);
+          destCells.insert(resolvedDest_idx, cellsToMove);
 
-          // Delete from source
-          sourceCells.delete(start_index, count);
+          // Delete from source (reverse order)
+          for (let i = sourceIndices.length - 1; i >= 0; i--) {
+            sourceCells.delete(sourceIndices[i], 1);
+          }
 
-          // Build summary of what was moved
           const cellSummaries: string[] = [];
           for (let i = 0; i < cellsToMove.length; i++) {
             const cell = cellsToMove[i];
             const type = cell.get("cell_type") || "code";
             const source = cell.get("source")?.toString() || "";
             const preview = getCodePreview(source, 50);
-            cellSummaries.push(`  [${dest_index + i}] ${type}: ${preview}`);
+            cellSummaries.push(`  [${resolvedDest_idx + i}] ${type}: ${preview}`);
           }
 
+          const rangeLabel = moveCellIds ? `${count} cells by ID` : `[${start_index}:${end_index}]`;
           return {
-            content: [
-              {
-                type: "text",
-                text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}:\n${cellSummaries.join("\n")}`,
-              },
-            ],
+            content: [{ type: "text", text: `Moved ${count} cell(s) from ${source_path} ${rangeLabel} to ${dest_path} at index ${resolvedDest_idx}:\n${cellSummaries.join("\n")}` }],
           };
         }
       }
@@ -2223,10 +2318,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "execute_range": {
-        const { path, start_index = 0, end_index, timeout } = args as {
+        const { path, start_index, end_index, cell_ids, timeout } = args as {
           path: string;
           start_index?: number;
           end_index?: number;
+          cell_ids?: string[];
           timeout?: number;
         };
 
@@ -2242,29 +2338,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { doc } = await connectToNotebook(path, session.kernelId);
         const cells = doc.getArray("cells");
 
-        const endIdx = end_index ?? cells.length - 1;
+        // Resolve which indices to execute
+        let indicesToExecute: number[];
+        let rangeLabel: string;
 
-        if (start_index < 0 || endIdx >= cells.length || start_index > endIdx) {
-          throw new Error(
-            `Invalid range [${start_index}, ${endIdx}]. Notebook has ${cells.length} cells.`
-          );
+        if (cell_ids && cell_ids.length > 0) {
+          indicesToExecute = resolveCellIds(cells, cell_ids);
+          rangeLabel = `${indicesToExecute.length} cells by ID`;
+        } else {
+          const startIdx = start_index ?? 0;
+          const endIdx = end_index ?? cells.length - 1;
+          if (startIdx < 0 || endIdx >= cells.length || startIdx > endIdx) {
+            throw new Error(
+              `Invalid range [${startIdx}, ${endIdx}]. Notebook has ${cells.length} cells.`
+            );
+          }
+          indicesToExecute = [];
+          for (let i = startIdx; i <= endIdx; i++) indicesToExecute.push(i);
+          rangeLabel = `cells ${startIdx}-${endIdx}`;
         }
 
         const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-        const results: { index: number; status: string; output?: string }[] = [];
+        const results: { index: number; cellId?: string; status: string; output?: string }[] = [];
 
-        for (let i = start_index; i <= endIdx; i++) {
+        for (const i of indicesToExecute) {
           const cell = cells.get(i) as Y.Map<any>;
           const type = getCellType(cell);
+          const cid = truncatedCellId(cell);
 
           if (type !== "code") {
-            results.push({ index: i, status: "skipped (not code)" });
+            results.push({ index: i, cellId: cid, status: "skipped (not code)" });
             continue;
           }
 
           const source = extractSource(cell);
           if (!source.trim()) {
-            results.push({ index: i, status: "skipped (empty)" });
+            results.push({ index: i, cellId: cid, status: "skipped (empty)" });
             continue;
           }
 
@@ -2273,11 +2382,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             updateCellOutputs(cell, result);
             results.push({
               index: i,
+              cellId: cid,
               status: result.status,
               output: result.text ? result.text.slice(0, 100) + (result.text.length > 100 ? "..." : "") : undefined,
             });
           } catch (err: any) {
-            results.push({ index: i, status: `error: ${err.message}` });
+            results.push({ index: i, cellId: cid, status: `error: ${err.message}` });
           }
         }
 
@@ -2288,7 +2398,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: `Executed cells ${start_index}-${endIdx} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}`,
+              text: `Executed ${rangeLabel} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}`,
             },
           ],
         };
@@ -4122,6 +4232,116 @@ del _target, _result_parts
             type: "text",
             text: summary + (details ? `\n\n${details}` : "\n\n(no differences)"),
           }],
+        };
+      }
+
+      // ================================================================
+      // Cell locking tools
+      // ================================================================
+
+      case "lock_cells": {
+        const { path, cell_ids: lockCellIds, owner = "claude-code", ttl_minutes = 5 } = args as {
+          path: string;
+          cell_ids: string[];
+          owner?: string;
+          ttl_minutes?: number;
+        };
+
+        // Resolve cell_id prefixes to full IDs
+        const { cells } = await getNotebookCells(path);
+        const fullIds: string[] = [];
+        for (const prefix of lockCellIds) {
+          const idx = resolveCellId(cells, prefix);
+          const cell = cells instanceof Array ? cells[idx] : (cells as any).get(idx);
+          const fullId = getCellId(cell);
+          if (fullId) fullIds.push(fullId);
+        }
+
+        const ttlMs = ttl_minutes * 60 * 1000;
+        const result = acquireLocks(path, fullIds, owner, ttlMs);
+
+        const lines: string[] = [];
+        if (result.acquired.length > 0) {
+          lines.push(`Locked ${result.acquired.length} cell(s) for "${owner}" (expires in ${ttl_minutes} min):`);
+          for (const lock of result.acquired) {
+            lines.push(`  ${lock.cellId.slice(0, 8)} — locked until ${new Date(lock.expiresAt).toLocaleTimeString()}`);
+          }
+        }
+        if (result.blocked.length > 0) {
+          lines.push(`\nBlocked ${result.blocked.length} cell(s) — already locked:`);
+          for (const b of result.blocked) {
+            lines.push(`  ${b.cellId.slice(0, 8)} — held by "${b.owner}"`);
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") || "No cells to lock." }],
+        };
+      }
+
+      case "unlock_cells": {
+        const { path, cell_ids: unlockCellIds, owner = "claude-code", force = false } = args as {
+          path: string;
+          cell_ids: string[];
+          owner?: string;
+          force?: boolean;
+        };
+
+        // Resolve cell_id prefixes to full IDs
+        const { cells } = await getNotebookCells(path);
+        const fullIds: string[] = [];
+        for (const prefix of unlockCellIds) {
+          try {
+            const idx = resolveCellId(cells, prefix);
+            const cell = cells instanceof Array ? cells[idx] : (cells as any).get(idx);
+            const fullId = getCellId(cell);
+            if (fullId) fullIds.push(fullId);
+          } catch {
+            // Cell may have been deleted — try the prefix as-is
+            fullIds.push(prefix);
+          }
+        }
+
+        const result = releaseLocks(path, fullIds, owner, force);
+
+        const lines: string[] = [];
+        if (result.released.length > 0) {
+          lines.push(`Unlocked ${result.released.length} cell(s):`);
+          for (const id of result.released) lines.push(`  ${id.slice(0, 8)}`);
+        }
+        if (result.notOwned.length > 0) {
+          lines.push(`\n${result.notOwned.length} cell(s) owned by someone else (use force=true):`);
+          for (const id of result.notOwned) lines.push(`  ${id.slice(0, 8)}`);
+        }
+        if (result.notFound.length > 0) {
+          lines.push(`\n${result.notFound.length} cell(s) had no lock:`);
+          for (const id of result.notFound) lines.push(`  ${id.slice(0, 8)}`);
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") || "No cells to unlock." }],
+        };
+      }
+
+      case "list_locks": {
+        const { path } = args as { path: string };
+
+        const activeLocks = listLocksForPath(path);
+
+        if (activeLocks.length === 0) {
+          return {
+            content: [{ type: "text", text: `No active locks on ${path}.` }],
+          };
+        }
+
+        const lines = [`${activeLocks.length} active lock(s) on ${path}:\n`];
+        for (const lock of activeLocks) {
+          const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
+          lines.push(`  ${lock.cellId.slice(0, 8)} — owner: "${lock.owner}", expires in ${remaining}s`);
+        }
+
+        return {
+          content: [{ type: "text", text: lines.join("\n") }],
         };
       }
 
