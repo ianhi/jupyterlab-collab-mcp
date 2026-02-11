@@ -20,7 +20,7 @@ export default defineConfig({
           "https://github.com/ianhi/jupyterlab-collab-mcp/edit/main/docs/",
       },
       sidebar: [
-        { label: "jupyter-claude Launcher", slug: "jupyter-claude" },
+        { label: "jlab-mcp Launcher", slug: "jlab-mcp" },
         {
           label: "Tools",
           items: [
@@ -40,6 +40,7 @@ export default defineConfig({
             { label: "Multi-Agent Collaboration", slug: "guides/multi-agent" },
           ],
         },
+        { label: "Built by Agents", slug: "dogfooding" },
         { label: "Comparison", slug: "comparison" },
         { label: "Changelog", slug: "changelog" },
       ],

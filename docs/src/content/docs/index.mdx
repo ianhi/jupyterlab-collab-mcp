@@ -5,74 +5,48 @@ description: An MCP server for real-time Jupyter notebook collaboration. Changes
 
 import { Steps, Aside } from "@astrojs/starlight/components";
 
-An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Changes appear instantly in your browser — no reloading. Claude sees where your cursor is and won't touch the cell you're editing.
+An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Changes appear instantly in your browser — no reloading. The server sees where your cursor is and won't touch the cell you're editing.
 
 {/* TODO: Add demo GIF here */}
 {/* <img src="/demo.gif" alt="Demo of Claude Code editing a notebook in real-time" /> */}
 
 ## Install
 
-### Prerequisites
-
-- **JupyterLab 4.x** with `jupyter-collaboration` installed
-- **Claude Code**
-
-```bash
-# Install jupyter-collaboration if you don't have it
-pip install jupyter-collaboration
-```
-
-<Aside type="tip">
-  Use the [`jupyter-claude` launcher](/jupyter-claude/) to skip manual extension
-  setup — it auto-installs `jupyter-collaboration` and other useful extensions.
-</Aside>
-
-### Setup
-
 <Steps>
 
-1. **Register the MCP server with Claude Code**
-
-   Pick one of three options:
-
-   **With npx (recommended)** — requires [Node.js 18+](https://nodejs.org/):
+1. **Register the MCP server** — pick one option:
 
    ```bash
+   # With npx (recommended) — requires Node.js 18+
    claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
-   ```
 
-   **With uvx (no Node.js required)** — uses the [`deno`](https://pypi.org/project/deno/) PyPI package:
-
-   ```bash
+   # With uvx (no Node.js required)
    claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-collab-mcp
-   ```
-
-   **From source (development)**:
-
-   ```bash
-   git clone https://github.com/ianhi/jupyterlab-collab-mcp.git
-   cd jupyterlab-collab-mcp
-   npm install && npm run build
-   claude mcp add -s user jupyter -- node $PWD/dist/index.js
    ```
 
    The `-s user` flag makes it available across all projects.
 
-2. **Start JupyterLab**
+2. **Start JupyterLab** with [jupyter-collaboration](https://github.com/jupyterlab/jupyter-collaboration) enabled:
 
    ```bash
+   # Easiest — auto-installs jupyter-collaboration + useful extensions
+   npx jupyterlab-collab-mcp jlab-mcp
+
+   # Or if you already have jupyter-collaboration installed
    jupyter lab
    ```
 
-   Or use the [`jupyter-claude` launcher](/jupyter-claude/) for automatic extension management.
+   See the [`jlab-mcp` docs](/jlab-mcp/) for configuration and environment detection.
 
-4. **Connect from Claude Code**
-
-   Copy the URL from JupyterLab's terminal output (including the token), then tell Claude:
+3. **Connect from Claude Code** — paste the URL from JupyterLab's terminal output:
 
    > Connect to http://localhost:8888/lab?token=abc123
 
 </Steps>
+
+<Aside type="tip">
+  **From source (development):** `git clone`, `npm install && npm run build`, then register with `claude mcp add -s user jupyter -- node $PWD/dist/index.js`. See the [repo](https://github.com/ianhi/jupyterlab-collab-mcp) for details.
+</Aside>
 
 ## What's special
 
@@ -111,27 +85,11 @@ Once connected, try:
 
 See the [Tool Reference](/tools/) for the full list of 51 tools.
 
-## Built by dogfooding with Claude
+## Built by agents, for agents
 
-This project was developed using itself. Each feature was tested by having Claude agents use it to do real notebook work — not synthetic tests, but actual data science tasks. The agents reported back what was missing, broken, or awkward, and those reports directly drove the roadmap.
+The real users of an MCP server aren't humans — they're AI agents. So this project was built by having agents use it and report back what was broken or missing. Over four rounds of increasingly complex multi-agent testing (up to 6 agents on 4 notebooks simultaneously), every collaboration feature — cell IDs, locking, change tracking, snapshots — was driven by agent feedback.
 
-### Round 1: Single agent, basic tools
-
-One Claude agent built a notebook from scratch. It immediately revealed that positional indices are fragile — inserting a cell shifts every index below it. This led to **cell ID addressing**: stable 8-character IDs that survive insertions and deletions.
-
-### Round 2: Human + agent collaboration
-
-Working alongside a human in the same notebook exposed a key problem: Claude would overwrite cells the human was actively editing. This led to **cursor awareness** (`get_user_focus`) and **human-focus protection** — write tools now check the JupyterLab awareness protocol and refuse to modify cells a human is typing in.
-
-### Round 3: Agent teams (Lorenz attractor)
-
-Six Claude agents worked simultaneously across four notebooks to simulate and analyze a Lorenz attractor. An ETL agent loaded data, a model agent computed Lyapunov exponents (getting 0.9069 — real math!), a visualization agent built plots, and an adversary agent deliberately tried to corrupt other agents' work. This round exposed that `copy_cells` operations weren't being tracked in the change log and that lock TTLs were too short. Both were fixed.
-
-### Round 4: Concurrent writes to the same notebook
-
-Five agents all wrote to the same two notebooks simultaneously — a weather station dashboard. This was the stress test for the collaboration system. Results: 31 cells, 39 tracked versions, true same-second concurrent writes, zero cell ID collisions, zero data loss. The adversary agent confirmed lock enforcement worked (4/4 blocked). A deleted cell was successfully recovered with full content preservation.
-
-Each round, every agent wrote a feedback report. Their suggestions directly produced features like `batch_insert_cells`, the `client_name` attribution parameter, and the 10-minute default lock TTL. The [multi-agent guide](/guides/multi-agent/) documents the patterns that emerged from this process.
+Read the full story: [Built by Agents](/dogfooding/)
 
 ## Development
 

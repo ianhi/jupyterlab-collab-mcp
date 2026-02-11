@@ -1,48 +1,57 @@
 ---
-title: jupyter-claude Launcher
-description: Launch JupyterLab with all the right extensions for Claude Code collaboration.
+title: jlab-mcp Launcher
+description: Launch JupyterLab with all the right extensions for MCP collaboration.
 ---
 
-The `jupyter-claude` script is a convenience launcher that starts JupyterLab with all the extensions Claude Code needs, without modifying your project's dependencies.
+The `jlab-mcp` launcher starts JupyterLab with all the extensions needed for MCP collaboration, without modifying your project's dependencies. Also available as `jupyter-collab`.
 
 ## Usage
 
 ```bash
-# Add to your PATH (one-time setup)
-export PATH="/path/to/jupyterlab-collab-mcp/bin:$PATH"
+# If installed via npm
+jlab-mcp
 
-# Launch from any directory
-jupyter-claude
+# Or via npx (no install needed)
+npx jupyterlab-collab-mcp jlab-mcp
 
 # Skip user extensions (core only, useful for debugging)
-jupyter-claude --no-extras
+jlab-mcp --no-extras
 
 # Pass arguments through to jupyter lab
-jupyter-claude --no-browser --ip=0.0.0.0
+jlab-mcp --no-browser --ip=0.0.0.0
 ```
 
 ## Core extensions
 
-These are always injected and cannot be removed — they're required for Claude Code integration:
+These are always injected and cannot be removed — they're required for MCP collaboration:
 
 | Package | Purpose |
 |---------|---------|
-| `jupyter-collaboration` | Real-time sync for Claude Code |
+| `jupyter-collaboration` | Real-time sync via y-websocket |
 | `jupyter-lsp` + `python-lsp-server` | Diagnostics and hover info |
 
-## User extensions
+## Managing extensions
 
-On first run, `jupyter-claude` creates a config file at `~/.config/jupyter-claude/config.toml` with these defaults:
+Use subcommands to manage user extensions without editing the config file:
+
+```bash
+# List all configured extensions
+jlab-mcp list
+
+# Add extensions
+jlab-mcp add jupyterlab-drawio jupyterlab-execute-time
+
+# Remove extensions
+jlab-mcp remove jupyterlab-vim
+```
+
+Duplicates are detected automatically. Changes take effect on the next launch.
+
+## Config file
+
+On first run, `jlab-mcp` creates `~/.config/jlab-mcp/config.toml` with defaults:
 
 ```toml
-# jupyter-claude configuration
-#
-# Extra packages to include when launching JupyterLab.
-# Core extensions (jupyter-collaboration, jupyter-lsp, python-lsp-server)
-# are always included and don't need to be listed here.
-#
-# To skip these extras temporarily, run: jupyter-claude --no-extras
-
 extensions = [
     "jupyterlab-vim",
     "jupyterlab-myst",
@@ -50,9 +59,7 @@ extensions = [
 ]
 ```
 
-Edit this file to add or remove extensions. Changes take effect on the next launch — no rebuild needed.
-
-The config location respects `$XDG_CONFIG_HOME` (falls back to `~/.config`).
+You can also edit this file directly. The config location respects `$XDG_CONFIG_HOME` (falls back to `~/.config`).
 
 ## Environment detection
 
@@ -80,7 +87,7 @@ The launcher auto-detects your environment:
 All other arguments are passed through to `jupyter lab`:
 
 ```bash
-JUPYTER_PORT=9999 jupyter-claude --no-browser --ip=0.0.0.0
+JUPYTER_PORT=9999 jlab-mcp --no-browser --ip=0.0.0.0
 ```
 
 The script handles Ctrl+C gracefully, force-killing JupyterLab if it hangs during shutdown.

@@ -48,20 +48,22 @@ claude mcp add -s user jupyter -- node $PWD/dist/index.js
 
 ## Usage
 
-1. Start JupyterLab with `jupyter lab` (or use [`jupyter-claude`](#jupyter-claude-launcher) below)
-2. Ensure `jupyter-collaboration` is installed (`pip install jupyter-collaboration`)
-3. In Claude Code: _"Connect to http://localhost:8888/lab?token=..."_
-4. Ask Claude to read, edit, or run cells
+1. Start JupyterLab with `jlab-mcp` (or `jupyter lab` if you already have `jupyter-collaboration` installed)
+2. In Claude Code: _"Connect to http://localhost:8888/lab?token=..."_
+3. Ask Claude to read, edit, or run cells
 
 Most tools also work **without** a JupyterLab connection by reading/writing `.ipynb` files directly (no kernel operations in this mode).
 
-## jupyter-claude launcher
+## jlab-mcp launcher
 
-The `bin/jupyter-claude` script launches JupyterLab with all the right extensions (collaboration, LSP, vim, MyST, git) without modifying your project dependencies. Requires [uv](https://docs.astral.sh/uv/).
+The `jlab-mcp` command (also available as `jupyter-collab`) launches JupyterLab with all the right extensions (collaboration, LSP, vim, MyST, git) without modifying your project dependencies. Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
-export PATH="/path/to/jupyterlab-collab-mcp/bin:$PATH"
-jupyter-claude
+# If installed via npm
+jlab-mcp
+
+# Or via npx (no install needed)
+npx jupyterlab-collab-mcp jlab-mcp
 ```
 
 ## Documentation
