@@ -14,7 +14,10 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 
 ```
 src/
-├── index.ts        # MCP server (stdio transport)
+├── index.ts        # MCP server entry point + tool handlers
+├── connection.ts   # JupyterLab connection state, config, session management, kernel execution
+├── schemas.ts      # Tool schema definitions (all 41 tools)
+├── tool-helpers.ts # Shared handler patterns (getNotebookCells, resolveIndexParam, etc.)
 ├── helpers.ts      # Shared utilities (cell extraction, diffing, output formatting)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb without JupyterLab)
 ├── rename.ts       # Scope-aware Python rename via jedi
@@ -60,11 +63,49 @@ src/
 | `interrupt_kernel` | Stop running execution |
 | `restart_kernel` | Restart kernel (clears all state) |
 
+### Cell IDs (Stable Addressing)
+
+Every cell has a UUID `id` field. Tools show truncated IDs (8 chars) alongside indices and accept `cell_id` as an alternative to `index`:
+
+```
+update_cell(path, cell_id="a3f8c2d1", source="new code")  # instead of index
+get_notebook_content(path, cell_ids=["a3f8c2d1", "b7e4f9a2"])  # non-contiguous by ID
+insert_cell(path, cell_id="a3f8c2d1", source="code")  # insert AFTER that cell
+```
+
+Cell IDs are prefix-matched — use enough characters to be unambiguous. IDs stay stable across insertions/deletions, unlike positional indices.
+
+Tools with `cell_id`: `update_cell`, `delete_cell`, `execute_cell`, `change_cell_type`, `insert_cell` (after), `insert_and_execute` (after), `update_and_execute`, `clear_outputs`, `get_diagnostics`.
+
+Tools with `cell_ids` array: `get_notebook_content`, `get_cell_outputs`, `get_cell_metadata`, `set_cell_metadata`, `add_cell_tags`, `remove_cell_tags`, `delete_cells`.
+
+### Human-Focus Protection
+
+Write tools in Jupyter mode check the awareness protocol before modifying cells. If a human collaborator is editing the target cell, the operation is blocked:
+
+```
+Cannot modify cell 5 (a3f8c2d1) — user "Ian" is currently editing it. Use force=true to override.
+```
+
+Applied to: `update_cell`, `update_and_execute`, `delete_cell`, `change_cell_type`, `clear_outputs`. Use `force=true` to bypass.
+
+### Image Output Control
+
+Execute tools support `max_images` and `include_images` to prevent context blowout from plot-heavy cells:
+
+```
+execute_cell(path, index=5, max_images=2)       # show last 2 of N images
+execute_cell(path, index=5, include_images=false) # text-only output
+```
+
+When images are limited, the response notes how many were omitted. Available on: `execute_cell`, `execute_code`, `insert_and_execute`, `update_and_execute`, `get_cell_outputs`.
+
 ### Non-Contiguous Cell Operations
 
-Metadata/tag tools support `indices` array for non-contiguous cells:
+Metadata/tag tools support `indices` array or `cell_ids` for non-contiguous cells:
 ```
 add_cell_tags(path, indices=[2,4,6,8], tags=["hide-input"])
+add_cell_tags(path, cell_ids=["a3f8c2d1", "b7e4f9a2"], tags=["hide-input"])
 ```
 
 ### Context-Efficient Reading
@@ -76,6 +117,8 @@ cell_type: "code" (default), "markdown", or "all"
 include_outputs: false (default) - set true only when needed
 output_format: "text" (default) or "structured"
 start_index / end_index: read specific cell ranges
+indices: [2, 5, 8] - non-contiguous cell selection
+cell_ids: ["a3f8c2d1"] - select by cell ID
 ```
 
 **Output formats**:
@@ -172,6 +215,22 @@ Claude appears as "Claude Code" in JupyterLab's collaborators panel with:
 - Color: `#ff6b6b` (coral red)
 
 The `get_user_focus` tool uses JupyterLab's awareness protocol to see which cell the user is currently editing.
+
+## Agent Team Testing Strategy
+
+When testing multi-agent collaboration on notebooks, use a team of 4+ agents working simultaneously. The test should exercise:
+
+1. **Cell ID stability**: Agents use `cell_id` (not indices) for all operations. One agent inserting cells mid-notebook must not break another agent's references.
+2. **Cross-notebook operations**: Agents work across multiple notebooks using `copy_cells` and `move_cells`. E.g., one agent builds a data pipeline notebook while another builds a visualization notebook, and they share cells between them.
+3. **Execute range**: Agents use `execute_range` to run multi-cell sections, not just single cells.
+4. **Multi-plot cells**: Include cells that produce multiple matplotlib figures (subplots, figure galleries) to stress-test `max_images`/`include_images` context management. Agents should use `max_images=2` or `include_images=false` for plot-heavy cells to conserve context.
+5. **Concurrent inserts**: Multiple agents inserting cells in the same notebook simultaneously — cell IDs prevent index collisions.
+6. **Human-in-the-loop**: Human edits cells while agents work — agents should see focus-blocked errors and retry on different cells.
+
+Test phases:
+- Phase 1: Build & smoke test (`npm run build`, basic cell_id round-trip)
+- Phase 2: Multi-agent collaboration (4 agents, cell_id-based, parallel work)
+- Phase 3: Collect agent feedback on the experience and suggestions for harder tasks
 
 ## Important Notes
 

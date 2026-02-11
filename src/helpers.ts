@@ -372,6 +372,119 @@ export function extractOutputsWithTraceback(outputs: any[]): string {
 }
 
 /**
+ * Resolve a cell ID prefix to a numeric index.
+ * Works with both Y.Map cells (Jupyter mode) and plain objects (filesystem mode).
+ * Throws if no match or ambiguous match.
+ */
+export function resolveCellId(
+  cells: Y.Array<any> | any[],
+  cellId: string
+): number {
+  const matches: { index: number; id: string }[] = [];
+
+  const length = cells instanceof Y.Array ? cells.length : cells.length;
+
+  for (let i = 0; i < length; i++) {
+    const cell = cells instanceof Y.Array ? cells.get(i) : cells[i];
+    const id = getCellId(cell);
+    if (id && id.startsWith(cellId)) {
+      matches.push({ index: i, id });
+    }
+  }
+
+  if (matches.length === 0) {
+    throw new Error(`Cell ID '${cellId}' not found. Use get_notebook_content to see available cell IDs.`);
+  }
+
+  if (matches.length > 1) {
+    const locations = matches.map((m) => `index ${m.index}`).join(" and ");
+    throw new Error(
+      `Cell ID '${cellId}' is ambiguous, matches cells at ${locations}. Use more characters.`
+    );
+  }
+
+  return matches[0].index;
+}
+
+/**
+ * Resolve multiple cell ID prefixes to numeric indices.
+ * Returns sorted unique indices.
+ */
+export function resolveCellIds(
+  cells: Y.Array<any> | any[],
+  cellIds: string[]
+): number[] {
+  const indices = cellIds.map((id) => resolveCellId(cells, id));
+  return [...new Set(indices)].sort((a, b) => a - b);
+}
+
+/**
+ * Get truncated cell ID (first 8 characters) for display.
+ */
+export function truncatedCellId(cell: any): string | undefined {
+  const id = getCellId(cell);
+  return id ? id.slice(0, 8) : undefined;
+}
+
+/**
+ * Check if a human (non-Claude) collaborator is editing a specific cell.
+ * Uses the awareness protocol to detect active cursors.
+ * Returns { blocked: true, user: "Name" } if someone is editing, { blocked: false } otherwise.
+ */
+export function checkHumanFocus(
+  provider: any, // WebsocketProvider
+  doc: Y.Doc,
+  cellIndex: number
+): { blocked: boolean; user?: string } {
+  const awareness = provider.awareness;
+  if (!awareness) return { blocked: false };
+
+  const states = awareness.getStates();
+  const myClientId = awareness.clientID;
+  const cells = doc.getArray("cells");
+
+  for (const [clientId, state] of states.entries()) {
+    if (clientId === myClientId) continue;
+
+    // Skip other Claude instances
+    const username = state.user?.username;
+    if (username === "claude-code") continue;
+
+    const displayName = state.user?.display_name || state.user?.name || "Unknown";
+
+    // Check cursor positions
+    if (state.cursors && state.cursors.length > 0) {
+      for (const cursor of state.cursors) {
+        if (cursor.head && cursor.head.type) {
+          for (let i = 0; i < cells.length; i++) {
+            if (i !== cellIndex) continue;
+            const cell = cells.get(i) as Y.Map<any>;
+            if (cell instanceof Y.Map) {
+              const source = cell.get("source");
+              if (source instanceof Y.Text) {
+                try {
+                  const absPos = Y.createAbsolutePositionFromRelativePosition(
+                    cursor.head,
+                    doc
+                  );
+                  if (absPos && absPos.type === source) {
+                    return { blocked: true, user: displayName };
+                  }
+                } catch {
+                  // Not this cell
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { blocked: false };
+}
+
+/**
  * Truncate a diff string if it exceeds maxLines.
  * Shows first and last portions with a "... X lines omitted ..." message.
  */
@@ -390,4 +503,49 @@ export function truncateDiff(diff: string, maxLines: number = 30): string {
     `... ${omitted} lines omitted ...`,
     ...lines.slice(-keepBottom),
   ].join("\n");
+}
+
+/**
+ * Build MCP content array from execution result, with image limiting.
+ * Returns the content array for the MCP response.
+ */
+export function buildExecutionContent(
+  result: ExecutionResult,
+  textPrefix: string,
+  options: { max_images?: number; include_images?: boolean } = {}
+): any[] {
+  const { max_images, include_images = true } = options;
+
+  const content: any[] = [
+    {
+      type: "text",
+      text: textPrefix + (result.text || "(no output)"),
+    },
+  ];
+
+  if (!include_images || max_images === 0) {
+    if (result.images.length > 0) {
+      content[0].text += `\n\n(${result.images.length} image${result.images.length === 1 ? "" : "s"} not shown — set include_images=true or increase max_images to see them)`;
+    }
+    return content;
+  }
+
+  const effectiveMax = max_images ?? result.images.length; // default: show all
+  const images = result.images;
+
+  if (images.length > effectiveMax) {
+    // Show last N images (most recent/final plots are usually most relevant)
+    const omitted = images.length - effectiveMax;
+    content[0].text += `\n\n(showing last ${effectiveMax} of ${images.length} images — ${omitted} omitted, use max_images to adjust)`;
+    const kept = images.slice(-effectiveMax);
+    for (const img of kept) {
+      content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+  } else {
+    for (const img of images) {
+      content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+  }
+
+  return content;
 }
