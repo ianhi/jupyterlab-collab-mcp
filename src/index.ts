@@ -3820,6 +3820,302 @@ del _target, _result_parts
         }
       }
 
+      // ================================================================
+      // Change tracking tools
+      // ================================================================
+
+      case "get_cell_history": {
+        const { path, cell_id, limit = 20 } = args as {
+          path: string;
+          cell_id: string;
+          limit?: number;
+        };
+
+        const history = getCellHistory(path, cell_id, limit);
+        if (history.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `No change history found for cell '${cell_id}' in ${path}. History is only tracked during this session.`,
+            }],
+          };
+        }
+
+        const lines = history.map((c) => {
+          const time = new Date(c.timestamp).toLocaleTimeString();
+          let desc = `[v${c.version} ${time}] **${c.operation}** cell ${c.cellIndex} (${c.cellIdShort})`;
+          if (c.client) desc += ` by ${c.client}`;
+          if (c.detail) desc += ` — ${c.detail}`;
+          if (c.operation === "update" && c.oldSource !== undefined) {
+            const oldLines = c.oldSource.split("\n").length;
+            const newLines = (c.newSource || "").split("\n").length;
+            desc += ` (${oldLines} → ${newLines} lines)`;
+          }
+          return desc;
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Change history for cell '${cell_id}' in ${path} (${history.length} entries):\n\n${lines.join("\n")}`,
+          }],
+        };
+      }
+
+      case "get_notebook_changes": {
+        const { path, since_version = 0, limit = 50 } = args as {
+          path: string;
+          since_version?: number;
+          limit?: number;
+        };
+
+        const { changes, currentVersion } = getChangesSince(path, since_version, limit);
+
+        if (changes.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `No changes since version ${since_version} in ${path}. Current version: ${currentVersion}`,
+            }],
+          };
+        }
+
+        const lines = changes.map((c) => {
+          const time = new Date(c.timestamp).toLocaleTimeString();
+          let desc = `v${c.version} [${time}] ${c.operation} cell ${c.cellIndex} (${c.cellIdShort})`;
+          if (c.client) desc += ` by ${c.client}`;
+          if (c.detail) desc += ` — ${c.detail}`;
+          return desc;
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Changes in ${path} since v${since_version} (${changes.length} changes, now at v${currentVersion}):\n\n${lines.join("\n")}`,
+          }],
+        };
+      }
+
+      case "recover_cell": {
+        const { path, cell_id, index: insertAt } = args as {
+          path: string;
+          cell_id: string;
+          index?: number;
+        };
+
+        const deleted = getDeletedCellSource(path, cell_id);
+        if (!deleted) {
+          return {
+            content: [{
+              type: "text",
+              text: `No deleted cell matching '${cell_id}' found in change history for ${path}. History is only tracked during this session.`,
+            }],
+            isError: true,
+          };
+        }
+
+        // Re-insert the recovered cell using the same logic as insert_cell
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          const newCell: NotebookCell = {
+            cell_type: "code",
+            source: deleted.source,
+            metadata: {},
+            id: crypto.randomUUID(),
+            outputs: [],
+            execution_count: null,
+          };
+
+          const idx = insertAt ?? cells.length;
+          cells.splice(idx, 0, newCell);
+          await writeNotebook(resolved, notebook);
+
+          const newId = (newCell.id || "").slice(0, 8);
+          recordChange(path, {
+            operation: "restore",
+            cellId: newCell.id || "",
+            cellIdShort: newId,
+            cellIndex: idx,
+            newSource: deleted.source,
+            detail: `recovered from deleted cell ${cell_id}`,
+          });
+
+          return {
+            content: [{
+              type: "text",
+              text: `Recovered deleted cell '${cell_id}' (deleted at ${deleted.deletedAt}) → inserted as cell ${idx} (id: ${newId}) in ${path}\n\nRecovered ${deleted.source.split("\n").length} lines of source.`,
+            }],
+          };
+        }
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
+
+        const newCell = new Y.Map();
+        newCell.set("cell_type", "code");
+        newCell.set("source", new Y.Text(deleted.source));
+        newCell.set("metadata", new Y.Map());
+        newCell.set("outputs", new Y.Array());
+        newCell.set("execution_count", null);
+        const newCellId = crypto.randomUUID();
+        newCell.set("id", newCellId);
+
+        const idx = insertAt ?? cells.length;
+        cells.insert(idx, [newCell]);
+
+        const newId = newCellId.slice(0, 8);
+        recordChange(path, {
+          operation: "restore",
+          cellId: newCellId,
+          cellIdShort: newId,
+          cellIndex: idx,
+          newSource: deleted.source,
+          detail: `recovered from deleted cell ${cell_id}`,
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Recovered deleted cell '${cell_id}' (deleted at ${deleted.deletedAt}) → inserted as cell ${idx} (id: ${newId}) in ${path}\n\nRecovered ${deleted.source.split("\n").length} lines of source.`,
+          }],
+        };
+      }
+
+      // ================================================================
+      // Snapshot tools
+      // ================================================================
+
+      case "snapshot_notebook": {
+        const { path, name: snapName, description: snapDesc } = args as {
+          path: string;
+          name: string;
+          description?: string;
+        };
+
+        const { cells } = await getNotebookCells(path);
+        const snapshot = createSnapshot(path, snapName, cells, snapDesc);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Snapshot '${snapName}' saved for ${path} (${snapshot.cells.length} cells captured at ${snapshot.createdAt})${snapDesc ? `\nDescription: ${snapDesc}` : ""}`,
+          }],
+        };
+      }
+
+      case "restore_snapshot": {
+        const { path, name: snapName } = args as {
+          path: string;
+          name: string;
+        };
+
+        const snapshot = getSnapshot(path, snapName);
+        if (!snapshot) {
+          throw new Error(`No snapshot named '${snapName}' found for ${path}. Use list_snapshots to see available snapshots.`);
+        }
+
+        // Auto-save a pre-restore snapshot for safety
+        const { cells, mode, notebook, doc } = await getNotebookCells(path);
+        createSnapshot(path, `pre-restore-${Date.now()}`, cells, `Auto-saved before restoring '${snapName}'`);
+
+        if (mode === "jupyter" && doc) {
+          const yCells = doc.getArray("cells");
+          const restored = restoreSnapshotToYjs(snapshot, yCells, doc);
+
+          recordChange(path, {
+            operation: "restore",
+            cellId: "",
+            cellIdShort: "",
+            cellIndex: -1,
+            detail: `restored snapshot '${snapName}' (${restored} cells)`,
+          });
+
+          return {
+            content: [{
+              type: "text",
+              text: `Restored snapshot '${snapName}' to ${path} (${restored} cells). A pre-restore snapshot was auto-saved.`,
+            }],
+          };
+        } else if (notebook) {
+          const newCells = restoreSnapshotToFs(snapshot);
+          notebook.cells = newCells;
+          const resolved = resolveNotebookPath(path);
+          await writeNotebook(resolved, notebook);
+
+          return {
+            content: [{
+              type: "text",
+              text: `Restored snapshot '${snapName}' to ${path} (${newCells.length} cells). A pre-restore snapshot was auto-saved.`,
+            }],
+          };
+        }
+
+        throw new Error("Could not restore snapshot — notebook access failed.");
+      }
+
+      case "list_snapshots": {
+        const { path } = args as { path: string };
+
+        const snaps = listSnapshotsForPath(path);
+        if (snaps.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: `No snapshots saved for ${path}. Use snapshot_notebook to create one.`,
+            }],
+          };
+        }
+
+        const lines = snaps.map((s) => {
+          const time = new Date(s.createdAt).toLocaleTimeString();
+          let line = `- **${s.name}** (${s.cells.length} cells, ${time})`;
+          if (s.description) line += ` — ${s.description}`;
+          return line;
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: `Snapshots for ${path} (${snaps.length}):\n\n${lines.join("\n")}`,
+          }],
+        };
+      }
+
+      case "diff_snapshot": {
+        const { path, name: snapName } = args as {
+          path: string;
+          name: string;
+        };
+
+        const snapshot = getSnapshot(path, snapName);
+        if (!snapshot) {
+          throw new Error(`No snapshot named '${snapName}' found for ${path}.`);
+        }
+
+        const { cells } = await getNotebookCells(path);
+        const result = diffSnapshot(snapshot, cells);
+
+        const summary = `Diff: snapshot '${snapName}' vs current ${path}:\n` +
+          `  Added: ${result.added}, Deleted: ${result.deleted}, Modified: ${result.modified}, Unchanged: ${result.unchanged}`;
+
+        const details = result.details
+          .filter((d) => d.status !== "unchanged")
+          .map((d) => `  ${d.status === "added" ? "+" : d.status === "deleted" ? "-" : "~"} ${d.cellId} (${d.status})`)
+          .join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: summary + (details ? `\n\n${details}` : "\n\n(no differences)"),
+          }],
+        };
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
