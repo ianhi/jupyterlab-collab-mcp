@@ -13,8 +13,8 @@ import {
   listNotebookSessions,
   connectedNotebooks,
 } from "../connection.js";
-import { readdir, stat, rename as fsRename } from "fs/promises";
-import { join } from "path";
+import { readdir, stat, rename as fsRename } from "node:fs/promises";
+import { join } from "node:path";
 
 export const handlers: Record<
   string,

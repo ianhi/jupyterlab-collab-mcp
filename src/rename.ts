@@ -3,7 +3,7 @@
  * Uses jedi (via uvx or system python) to understand Python semantics.
  */
 
-import { spawn } from "child_process";
+import { spawn } from "node:child_process";
 import { type NotebookCell } from "./notebook-fs.js";
 import { getCellType, extractSource } from "./helpers.js";
 

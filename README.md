@@ -44,7 +44,6 @@ Requires [uv](https://docs.astral.sh/uv/) to be installed.
 ## Prerequisites
 
 - JupyterLab 4.x with `jupyter-collaboration` installed
-- Node.js 18+
 - Claude Code
 - [uv](https://docs.astral.sh/uv/) (optional, for `jupyter-claude` launcher and enhanced diagnostics)
 
@@ -55,6 +54,26 @@ pip install jupyter-collaboration
 
 ## Installation
 
+### With npx (recommended)
+
+Requires [Node.js 18+](https://nodejs.org/). No cloning or building needed:
+
+```bash
+claude mcp add -s user jupyter -- npx jupyterlab-claude-code
+```
+
+That's it. `npx` downloads and caches the package automatically.
+
+### With uvx (no Node.js required)
+
+If you don't have Node.js installed, the [`deno`](https://pypi.org/project/deno/) PyPI package bundles Deno — a JavaScript runtime with built-in npm compatibility:
+
+```bash
+claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-claude-code
+```
+
+### From source (development)
+
 ```bash
 git clone https://github.com/ianhi/jupyterlab-claude-code.git
 cd jupyterlab-claude-code
@@ -62,7 +81,7 @@ npm install && npm run build
 claude mcp add -s user jupyter -- node $PWD/dist/index.js
 ```
 
-No token in config - just paste your JupyterLab URL when connecting.
+No token in config — just paste your JupyterLab URL when connecting.
 
 ## Usage
 

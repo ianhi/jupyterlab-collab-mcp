@@ -3,8 +3,8 @@
  * Reads/writes .ipynb files directly without JupyterLab.
  */
 
-import { readFile, writeFile } from "fs/promises";
-import { resolve, isAbsolute } from "path";
+import { readFile, writeFile } from "node:fs/promises";
+import { resolve, isAbsolute } from "node:path";
 
 /** A single notebook cell (matches .ipynb JSON structure) */
 export interface NotebookCell {

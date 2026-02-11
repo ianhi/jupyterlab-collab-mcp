@@ -8,7 +8,7 @@
 import WebSocket from "ws";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
-import crypto from "crypto";
+import crypto from "node:crypto";
 import type { NotebookOutput, ExecutionResult } from "./helpers.js";
 
 // ============================================================================

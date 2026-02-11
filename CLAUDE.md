@@ -207,13 +207,20 @@ Unlike `replace_in_notebook`, this understands Python semantics — it won't ren
 ## Installation
 
 ```bash
+# With npx (recommended)
+claude mcp add -s user jupyter -- npx jupyterlab-claude-code
+
+# With uvx (no Node.js required)
+claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-claude-code
+
+# From source (development)
 git clone https://github.com/ianhi/jupyterlab-claude-code.git
 cd jupyterlab-claude-code
 npm install && npm run build
 claude mcp add -s user jupyter -- node $PWD/dist/index.js
 ```
 
-No token in config - just paste your JupyterLab URL when connecting:
+No token in config — just paste your JupyterLab URL when connecting:
 > "Connect to http://localhost:8888/lab?token=abc123"
 
 ## Key Technologies
