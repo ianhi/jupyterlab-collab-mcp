@@ -313,13 +313,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "insert_cell": {
-        const { path, index, cell_id, source, cell_type = "code" } = args as {
+        const { path, index, cell_id, source, cell_type = "code", client_name } = args as {
           path: string;
           index?: number;
           cell_id?: string;
           source: string;
           cell_type?: string;
+          client_name?: string;
         };
+        const clientId = client_name || "claude-code";
 
         if (!isJupyterConnected()) {
           const resolved = resolveNotebookPath(path);
@@ -362,7 +364,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIdShort: newId,
             cellIndex: insertIndex,
             newSource: source,
-            client: "claude-code",
+            client: clientId,
           });
           const insertDiff = [
             `--- /dev/null`,
@@ -420,7 +422,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIdShort: newCellId.slice(0, 8),
           cellIndex: insertIndex,
           newSource: source,
-          client: "claude-code",
+          client: clientId,
         });
 
         // Show what was inserted
@@ -443,13 +445,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "update_cell": {
-        const { path, index, cell_id, source, force = false } = args as {
+        const { path, index, cell_id, source, force = false, client_name } = args as {
           path: string;
           index?: number;
           cell_id?: string;
           source: string;
           force?: boolean;
+          client_name?: string;
         };
+        const clientId = client_name || "claude-code";
 
         if (!isJupyterConnected()) {
           const resolved = resolveNotebookPath(path);
@@ -478,7 +482,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIndex: resolvedIndex,
             oldSource,
             newSource: source,
-            client: "claude-code",
+            client: clientId,
           });
           const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
           return {
@@ -517,14 +521,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const cell = cells.get(resolvedIndex) as Y.Map<any>;
 
         // Check advisory lock
-        if (!force) {
-          const fullCellId = getCellId(cell) || "";
-          if (fullCellId) {
-            const lock = checkLock(path, fullCellId, "claude-code");
-            if (lock) {
+        let lockOverrideDetail: string | undefined;
+        const fullCellId = getCellId(cell) || "";
+        if (fullCellId) {
+          const lock = checkLock(path, fullCellId, clientId);
+          if (lock) {
+            if (!force) {
               const cellIdStr = truncatedCellId(cell);
               throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
             }
+            lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
           }
         }
 
@@ -549,7 +555,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIndex: resolvedIndex,
           oldSource,
           newSource: source,
-          client: "claude-code",
+          client: clientId,
+          detail: lockOverrideDetail,
         });
 
         const diff = generateUnifiedDiff(
@@ -657,12 +664,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "delete_cell": {
-        const { path, index, cell_id, force = false } = args as {
+        const { path, index, cell_id, force = false, client_name } = args as {
           path: string;
           index?: number;
           cell_id?: string;
           force?: boolean;
+          client_name?: string;
         };
+        const clientId = client_name || "claude-code";
 
         if (!isJupyterConnected()) {
           const resolved = resolveNotebookPath(path);
@@ -690,7 +699,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIdShort: cellIdStr || "",
             cellIndex: resolvedIndex,
             oldSource,
-            client: "claude-code",
+            client: clientId,
           });
 
           notebook.cells.splice(resolvedIndex, 1);
@@ -740,14 +749,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const cell = cells.get(resolvedIndex) as Y.Map<any>;
 
         // Check advisory lock
-        if (!force) {
-          const fullCellId = getCellId(cell) || "";
-          if (fullCellId) {
-            const lock = checkLock(path, fullCellId, "claude-code");
-            if (lock) {
+        let lockOverrideDetail: string | undefined;
+        const fullCellId = getCellId(cell) || "";
+        if (fullCellId) {
+          const lock = checkLock(path, fullCellId, clientId);
+          if (lock) {
+            if (!force) {
               const cellIdStr = truncatedCellId(cell);
               throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
             }
+            lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
           }
         }
 
@@ -761,7 +772,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIdShort: cellIdStr || "",
           cellIndex: resolvedIndex,
           oldSource,
-          client: "claude-code",
+          client: clientId,
+          detail: lockOverrideDetail,
         });
 
         cells.delete(resolvedIndex, 1);
@@ -968,7 +980,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "insert_and_execute": {
-        const { path, index, cell_id, source, timeout, max_images, include_images } = args as {
+        const { path, index, cell_id, source, timeout, max_images, include_images, client_name } = args as {
           path: string;
           index?: number;
           cell_id?: string;
@@ -976,7 +988,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           timeout?: number;
           max_images?: number;
           include_images?: boolean;
+          client_name?: string;
         };
+        const clientId = client_name || "claude-code";
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -1010,6 +1024,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const insertIndex = resolvedIndex === undefined || resolvedIndex === -1 ? cells.length : resolvedIndex;
         cells.insert(insertIndex, [newCell]);
 
+        recordChange(path, {
+          operation: "insert",
+          cellId: newCellId,
+          cellIdShort: newCellId.slice(0, 8),
+          cellIndex: insertIndex,
+          newSource: source,
+          client: clientId,
+        });
+
         // Execute the cell
         const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
         const result = await executeCode(session.kernelId, source, timeoutMs);
@@ -1022,7 +1045,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "update_and_execute": {
-        const { path, index, cell_id, source, force = false, timeout, max_images, include_images } = args as {
+        const { path, index, cell_id, source, force = false, timeout, max_images, include_images, client_name } = args as {
           path: string;
           index?: number;
           cell_id?: string;
@@ -1031,7 +1054,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           timeout?: number;
           max_images?: number;
           include_images?: boolean;
+          client_name?: string;
         };
+        const clientId = client_name || "claude-code";
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -1069,6 +1094,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const cell = cells.get(resolvedIndex) as Y.Map<any>;
 
+        // Check advisory lock
+        let lockOverrideDetail: string | undefined;
+        const fullCellId = getCellId(cell) || "";
+        if (fullCellId) {
+          const lock = checkLock(path, fullCellId, clientId);
+          if (lock) {
+            if (!force) {
+              const cellIdStr = truncatedCellId(cell);
+              throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+            }
+            lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
+          }
+        }
+
         // Update the cell source
         const oldSource = extractSource(cell);
         if (cell instanceof Y.Map) {
@@ -1080,6 +1119,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cell.set("source", new Y.Text(source));
           }
         }
+
+        recordChange(path, {
+          operation: "update",
+          cellId: getCellId(cell) || "",
+          cellIdShort: truncatedCellId(cell) || "",
+          cellIndex: resolvedIndex,
+          oldSource,
+          newSource: source,
+          client: clientId,
+          detail: lockOverrideDetail,
+        });
 
         // Execute the cell
         const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
@@ -1875,8 +1925,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           await writeNotebook(resolvedDest, destNb);
 
           const cellSummaries = copiedCells.map((cell, i) => {
+            const newId = (cell.id || "").slice(0, 8);
             const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
-            return `  [${insertAt + i}] ${cell.cell_type}: ${preview}`;
+            return `  [${insertAt + i}] (${newId}) ${cell.cell_type}: ${preview}`;
           });
 
           const rangeLabel = copyCellIds ? `${copyCellIds.length} cells by ID` : `[${start_index}:${end_index}]`;
@@ -1940,9 +1991,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         for (let i = 0; i < copiedCells.length; i++) {
           const cell = copiedCells[i];
           const type = cell.get("cell_type") || "code";
+          const newId = (cell.get("id") || "").slice(0, 8);
           const source = cell.get("source")?.toString() || "";
           const preview = getCodePreview(source, 50);
-          cellSummaries.push(`  [${insertAt + i}] ${type}: ${preview}`);
+          cellSummaries.push(`  [${insertAt + i}] (${newId}) ${type}: ${preview}`);
         }
 
         const rangeLabel = copyCellIds ? `${copyCellIds.length} cells by ID` : `[${start_index}:${end_index}]`;
@@ -4222,11 +4274,32 @@ del _target, _result_parts
         const summary = `Diff: snapshot '${snapName}' vs current ${path}:\n` +
           `  Added: ${result.added}, Deleted: ${result.deleted}, Modified: ${result.modified}, Unchanged: ${result.unchanged}`;
 
-        const details = result.details
-          .filter((d) => d.status !== "unchanged")
-          .map((d) => `  ${d.status === "added" ? "+" : d.status === "deleted" ? "-" : "~"} ${d.cellId} (${d.status})`)
-          .join("\n");
+        const detailLines: string[] = [];
+        for (const d of result.details) {
+          if (d.status === "unchanged") continue;
+          const prefix = d.status === "added" ? "+" : d.status === "deleted" ? "-" : "~";
+          let line = `  ${prefix} ${d.cellId} (${d.status})`;
 
+          if (d.status === "modified" && d.oldSource !== undefined && d.newSource !== undefined) {
+            const oldLines = d.oldSource.split("\n").length;
+            const newLines = d.newSource.split("\n").length;
+            line += ` [${oldLines} → ${newLines} lines]`;
+            // Show compact diff preview (first change)
+            const diff = generateUnifiedDiff(d.oldSource, d.newSource, d.cellId);
+            const diffLines = diff.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).slice(0, 6);
+            if (diffLines.length > 0) {
+              line += "\n" + diffLines.map(l => `      ${l}`).join("\n");
+            }
+          } else if (d.status === "deleted" && d.oldSource) {
+            line += ` [${d.oldSource.split("\n").length} lines removed]`;
+          } else if (d.status === "added" && d.newSource) {
+            line += ` [${d.newSource.split("\n").length} lines added]`;
+          }
+
+          detailLines.push(line);
+        }
+
+        const details = detailLines.join("\n");
         return {
           content: [{
             type: "text",

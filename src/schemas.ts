@@ -348,6 +348,10 @@ export const toolSchemas = [
           enum: ["code", "markdown"],
           description: "Cell type (default: code)",
         },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
+        },
       },
       required: ["path", "source"],
     },
@@ -377,6 +381,10 @@ export const toolSchemas = [
         force: {
           type: "boolean",
           description: "Force update even if a human is editing this cell. Default: false",
+        },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
         },
       },
       required: ["path", "source"],
@@ -430,6 +438,10 @@ export const toolSchemas = [
         force: {
           type: "boolean",
           description: "Force delete even if a human is editing this cell. Default: false",
+        },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
         },
       },
       required: ["path"],
@@ -724,6 +736,10 @@ export const toolSchemas = [
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
         },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
+        },
       },
       required: ["path", "source"],
     },
@@ -766,6 +782,10 @@ export const toolSchemas = [
         include_images: {
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
+        },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'model-agent'). Default: 'claude-code'",
         },
       },
       required: ["path", "source"],

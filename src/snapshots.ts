@@ -198,7 +198,14 @@ export function diffSnapshot(
   deleted: number;
   modified: number;
   unchanged: number;
-  details: { cellId: string; status: "added" | "deleted" | "modified" | "unchanged" }[];
+  details: {
+    cellId: string;
+    status: "added" | "deleted" | "modified" | "unchanged";
+    /** For modified cells: old source from snapshot */
+    oldSource?: string;
+    /** For modified/added cells: current source */
+    newSource?: string;
+  }[];
 } {
   const snapMap = new Map(snapshot.cells.map((c) => [c.id, c]));
   const currentMap = new Map<string, { source: string }>();
@@ -220,6 +227,8 @@ export function diffSnapshot(
   const details: {
     cellId: string;
     status: "added" | "deleted" | "modified" | "unchanged";
+    oldSource?: string;
+    newSource?: string;
   }[] = [];
 
   // Check snapshot cells against current
@@ -227,10 +236,10 @@ export function diffSnapshot(
     const current = currentMap.get(id);
     if (!current) {
       deleted++;
-      details.push({ cellId: id.slice(0, 8), status: "deleted" });
+      details.push({ cellId: id.slice(0, 8), status: "deleted", oldSource: snap.source });
     } else if (current.source !== snap.source) {
       modified++;
-      details.push({ cellId: id.slice(0, 8), status: "modified" });
+      details.push({ cellId: id.slice(0, 8), status: "modified", oldSource: snap.source, newSource: current.source });
     } else {
       unchanged++;
       details.push({ cellId: id.slice(0, 8), status: "unchanged" });
@@ -241,7 +250,7 @@ export function diffSnapshot(
   for (const id of currentMap.keys()) {
     if (!snapMap.has(id)) {
       added++;
-      details.push({ cellId: id.slice(0, 8), status: "added" });
+      details.push({ cellId: id.slice(0, 8), status: "added", newSource: currentMap.get(id)!.source });
     }
   }
 
