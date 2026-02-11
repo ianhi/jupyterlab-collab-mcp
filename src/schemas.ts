@@ -1137,4 +1137,155 @@ export const toolSchemas = [
       required: ["path1", "path2"],
     },
   },
+  // ========================================================================
+  // Change tracking tools
+  // ========================================================================
+  {
+    name: "get_cell_history",
+    description:
+      "Get the change history for a specific cell. Shows who changed it, when, what the old/new content was, and allows recovery of deleted cells. Requires that changes were tracked during this session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        cell_id: {
+          type: "string",
+          description: "Cell ID to get history for (prefix match)",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of history entries to return. Default: 20",
+        },
+      },
+      required: ["path", "cell_id"],
+    },
+  },
+  {
+    name: "get_notebook_changes",
+    description:
+      "Get all changes to a notebook since a given version number. Use version 0 to get all tracked changes. Returns the current version number for use in subsequent calls (polling pattern: call with last known version to get only new changes).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        since_version: {
+          type: "number",
+          description: "Return changes after this version number. Use 0 for all changes.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of changes to return. Default: 50",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "recover_cell",
+    description:
+      "Recover a deleted cell by finding its last known content in the change history and re-inserting it. Only works for cells deleted during this session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        cell_id: {
+          type: "string",
+          description: "Cell ID of the deleted cell to recover (prefix match)",
+        },
+        index: {
+          type: "number",
+          description: "Position to re-insert the cell. Default: end of notebook",
+        },
+      },
+      required: ["path", "cell_id"],
+    },
+  },
+  // ========================================================================
+  // Snapshot tools
+  // ========================================================================
+  {
+    name: "snapshot_notebook",
+    description:
+      "Save a named snapshot of the notebook's current state. Captures all cell content, types, and metadata. Use before risky operations or to create a known-good checkpoint for recovery.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        name: {
+          type: "string",
+          description: "Name for this snapshot (e.g., 'before-refactor', 'v1-working')",
+        },
+        description: {
+          type: "string",
+          description: "Optional description of what state this captures",
+        },
+      },
+      required: ["path", "name"],
+    },
+  },
+  {
+    name: "restore_snapshot",
+    description:
+      "Restore a notebook to a previously saved snapshot. WARNING: This replaces ALL cells in the notebook with the snapshot's cells. Outputs are cleared. Creates an automatic 'pre-restore' snapshot first for safety.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        name: {
+          type: "string",
+          description: "Name of the snapshot to restore",
+        },
+      },
+      required: ["path", "name"],
+    },
+  },
+  {
+    name: "list_snapshots",
+    description:
+      "List all saved snapshots for a notebook. Shows name, creation time, cell count, and description.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "diff_snapshot",
+    description:
+      "Compare a saved snapshot against the notebook's current state. Shows which cells were added, deleted, modified, or unchanged since the snapshot was taken.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        name: {
+          type: "string",
+          description: "Name of the snapshot to compare against",
+        },
+      },
+      required: ["path", "name"],
+    },
+  },
 ];
