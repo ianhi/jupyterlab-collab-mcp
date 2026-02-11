@@ -39,6 +39,15 @@ export const toolSchemas = [
     },
   },
   {
+    name: "list_kernels",
+    description:
+      "List available kernel types and running kernel instances. Requires JupyterLab connection. Returns kernel specs (e.g., python3, ir, julia) and active kernel sessions with their status.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
     name: "open_notebook",
     description:
       "Open a notebook and start a kernel session. Requires JupyterLab connection. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",

@@ -75,6 +75,54 @@ export const handlers: Record<
     };
   },
 
+  list_kernels: async (_args) => {
+    // Get available kernel specs
+    const specsResponse = await apiFetch("/api/kernelspecs");
+    if (!specsResponse.ok) {
+      throw new Error(`Failed to list kernel specs: ${specsResponse.statusText}`);
+    }
+    const specsData = await specsResponse.json();
+
+    // Get running kernel instances
+    const kernelsResponse = await apiFetch("/api/kernels");
+    if (!kernelsResponse.ok) {
+      throw new Error(`Failed to list kernels: ${kernelsResponse.statusText}`);
+    }
+    const kernels: any[] = await kernelsResponse.json();
+
+    // Format kernel specs
+    const specs = Object.entries(specsData.kernelspecs || {}).map(
+      ([name, spec]: [string, any]) => ({
+        name,
+        displayName: spec.spec?.display_name || name,
+        language: spec.spec?.language || "unknown",
+      })
+    );
+
+    // Format running kernels
+    const running = kernels.map((k: any) => ({
+      id: k.id,
+      name: k.name,
+      state: k.execution_state,
+      lastActivity: k.last_activity,
+    }));
+
+    const lines: string[] = [];
+    lines.push(`Available kernel types (default: ${specsData.default || "python3"}):`);
+    for (const s of specs) {
+      lines.push(`  - ${s.name} (${s.displayName}, ${s.language})`);
+    }
+    lines.push("");
+    lines.push(`Running kernels: ${running.length}`);
+    for (const k of running) {
+      lines.push(`  - ${k.id.slice(0, 8)} [${k.name}] ${k.state} (last activity: ${k.lastActivity})`);
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+    };
+  },
+
   list_files: async (args) => {
     const { path = "" } = args as { path?: string };
 
