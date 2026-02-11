@@ -1,5 +1,5 @@
 ---
-title: Built by Agents
+title: For Agents, by Agents
 description: How agent-driven dogfooding shaped every feature in this MCP server.
 ---
 

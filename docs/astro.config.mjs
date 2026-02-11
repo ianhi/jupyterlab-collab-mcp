@@ -40,7 +40,7 @@ export default defineConfig({
             { label: "Multi-Agent Collaboration", slug: "guides/multi-agent" },
           ],
         },
-        { label: "Built by Agents", slug: "dogfooding" },
+        { label: "For Agents, by Agents", slug: "dogfooding" },
         { label: "Comparison", slug: "comparison" },
         { label: "Changelog", slug: "changelog" },
       ],
