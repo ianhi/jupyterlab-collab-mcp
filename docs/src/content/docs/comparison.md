@@ -19,9 +19,10 @@ This project was developed independently before we discovered [datalayer/jupyter
 | Change tracking | Per-cell version history | Not available |
 | Snapshots | Named checkpoints | Not available |
 | Multi-agent | Cell IDs, locks, attribution | Not designed for this |
-| Streaming execution | No | Yes |
-| JupyterLab commands | No | `run-all-cells`, `get-selected-cell` |
-| Kernel listing | No | `list_kernels` |
+| Streaming execution | Not yet (WebSocket ready) | Yes |
+| Run all cells | `execute_range` (full control) | `run-all-cells` |
+| Selected cell | `get_user_focus` (cursor + cell) | `get-selected-cell` |
+| Kernel listing | Not yet (easy to add) | `list_kernels` |
 
 ## Our advantages
 
@@ -53,7 +54,7 @@ get_user_focus(path) → { focusedCell: 3, cursorPosition: 42 }
 
 ### Multi-agent collaboration
 
-Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](/guides/multi-agent/).
+Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](/agents/multi-agent/).
 
 ### 51 tools
 
@@ -62,9 +63,7 @@ Comprehensive coverage: batch operations, cross-notebook copy/move, cell ID addr
 ## Their advantages
 
 - **Streamable HTTP transport** — multiple clients, survives disconnects
-- **Streaming execution** — output during long-running cells
-- **JupyterLab UI commands** — run-all-cells, get-selected-cell
-- **Kernel listing** — see available kernels
+- **Streaming execution** — output during long-running cells (we have the WebSocket plumbing but don't surface it yet)
 - **Python ecosystem** — `pip install` if you prefer Python
 - **Docker support** — containerized deployment
 

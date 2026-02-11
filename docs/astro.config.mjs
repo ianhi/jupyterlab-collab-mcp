@@ -35,9 +35,10 @@ export default defineConfig({
           ],
         },
         {
-          label: "Guides",
+          label: "For Agents",
           items: [
-            { label: "Multi-Agent Collaboration", slug: "guides/multi-agent" },
+            { label: "Best Practices", slug: "agents/best-practices" },
+            { label: "Multi-Agent Workflows", slug: "agents/multi-agent" },
           ],
         },
         { label: "For Agents, by Agents", slug: "dogfooding" },
