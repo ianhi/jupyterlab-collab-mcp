@@ -31,9 +31,21 @@ import {
   getCodePreview,
   extractOutputsWithTraceback,
   truncateDiff,
+  formatOutputsAsText,
   type NotebookOutput,
   type ExecutionResult,
 } from "./helpers.js";
+import {
+  readNotebook,
+  writeNotebook,
+  resolveNotebookPath,
+  createEmptyNotebook,
+  sourceToLines,
+  type NotebookData,
+  type NotebookCell,
+} from "./notebook-fs.js";
+import { readdir, stat, rename as fsRename } from "fs/promises";
+import { join, resolve as pathResolve } from "path";
 
 // Dynamic configuration - set via connect_jupyter tool
 let jupyterConfig: {
@@ -51,6 +63,10 @@ function getConfig() {
     );
   }
   return jupyterConfig;
+}
+
+function isJupyterConnected(): boolean {
+  return jupyterConfig !== null;
 }
 
 // ============================================================================
@@ -469,7 +485,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "connect_jupyter",
         description:
-          "Connect to a JupyterLab server. MUST be called first - other tools will error with 'Not connected to JupyterLab' until this succeeds. Provide the full URL with token (e.g., http://localhost:8888/lab?token=abc123).",
+          "Connect to a JupyterLab server. Required for kernel operations (execute, restart, etc.) and real-time sync. Many tools (reading, editing, search) work without connecting by reading .ipynb files directly. Provide the full URL with token (e.g., http://localhost:8888/lab?token=abc123).",
         inputSchema: {
           type: "object",
           properties: {
@@ -499,7 +515,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "list_notebooks",
         description:
-          "List notebooks with active kernel sessions. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel, or list_files to see all .ipynb files regardless of kernel state. Returns paths and kernel IDs.",
+          "List notebooks with active kernel sessions. Requires JupyterLab connection. Only shows notebooks where a kernel is running (not just open in browser). Use open_notebook to start a kernel, or list_files to see all .ipynb files regardless of kernel state. Returns paths and kernel IDs.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -508,7 +524,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "open_notebook",
         description:
-          "Open a notebook and start a kernel session. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",
+          "Open a notebook and start a kernel session. Requires JupyterLab connection. Safe to call if already open (will reuse existing kernel). Required before executing cells in a notebook not yet listed by list_notebooks.",
         inputSchema: {
           type: "object",
           properties: {
@@ -702,7 +718,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_hover_info",
         description:
-          "Get documentation/type info for code at a specific position. Uses LSP if available, otherwise falls back to kernel introspection. Useful for understanding unfamiliar code.",
+          "Get documentation/type info for code at a specific position. Requires JupyterLab connection. Uses LSP if available, otherwise falls back to kernel introspection. Useful for understanding unfamiliar code.",
         inputSchema: {
           type: "object",
           properties: {
@@ -729,7 +745,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_user_focus",
         description:
-          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
+          "Get the cell the user is currently focused on via JupyterLab's awareness protocol. Requires JupyterLab connection. Returns active cell index and cursor position. Returns null/empty if no user is actively editing the notebook.",
         inputSchema: {
           type: "object",
           properties: {
@@ -955,7 +971,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_cell",
         description:
-          "Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are returned here. Supports text output and images.",
+          "Execute a cell in the notebook's kernel. Requires JupyterLab connection. Outputs appear in JupyterLab and are returned here. Supports text output and images.",
         inputSchema: {
           type: "object",
           properties: {
@@ -978,7 +994,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_code",
         description:
-          "Execute code in the notebook's kernel without modifying the notebook. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
+          "Execute code in the notebook's kernel without modifying the notebook. Requires JupyterLab connection. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1006,7 +1022,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "execute_range",
         description:
-          "Execute multiple cells in sequence. Continues on error (doesn't stop). Returns status per cell. Useful for running a section or the entire notebook.",
+          "Execute multiple cells in sequence. Requires JupyterLab connection. Continues on error (doesn't stop). Returns status per cell. Useful for running a section or the entire notebook.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1033,7 +1049,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "insert_and_execute",
         description:
-          "Insert a new code cell and immediately execute it. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
+          "Insert a new code cell and immediately execute it. Requires JupyterLab connection. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1060,7 +1076,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "update_and_execute",
         description:
-          "Update a cell's source code and immediately execute it. Combines update_cell + execute_cell in one operation. Returns the execution output.",
+          "Update a cell's source code and immediately execute it. Requires JupyterLab connection. Combines update_cell + execute_cell in one operation. Returns the execution output.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1322,7 +1338,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_kernel_status",
         description:
-          "Get the status of a notebook's kernel (idle, busy, starting, dead). Use to check if execution is complete or if kernel needs restart.",
+          "Get the status of a notebook's kernel (idle, busy, starting, dead). Requires JupyterLab connection. Use to check if execution is complete or if kernel needs restart.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1337,7 +1353,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "get_kernel_variables",
         description:
-          "List variables defined in the notebook's kernel. Returns variable names, types, and short representations. Useful for inspecting kernel state without writing code.",
+          "List variables defined in the notebook's kernel. Requires JupyterLab connection. Returns variable names, types, and short representations. Useful for inspecting kernel state without writing code.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1360,7 +1376,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "interrupt_kernel",
         description:
-          "Interrupt (stop) a running execution. Use when code is taking too long or stuck in an infinite loop. Does not restart the kernel or clear state.",
+          "Interrupt (stop) a running execution. Requires JupyterLab connection. Use when code is taking too long or stuck in an infinite loop. Does not restart the kernel or clear state.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1375,7 +1391,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "restart_kernel",
         description:
-          "Restart the kernel, clearing all variables and state. Use when kernel is unresponsive, memory is full, or you need a clean slate. All variables will be lost.",
+          "Restart the kernel, clearing all variables and state. Requires JupyterLab connection. Use when kernel is unresponsive, memory is full, or you need a clean slate. All variables will be lost.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1409,7 +1425,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: "diff_notebooks",
         description:
-          "Compare two .ipynb notebooks cell by cell. Returns unified diff showing additions (+), deletions (-), and modifications per cell. Both must be open in JupyterLab. Use summary_only=true for counts only.",
+          "Compare two .ipynb notebooks cell by cell. Returns unified diff showing additions (+), deletions (-), and modifications per cell. Use summary_only=true for counts only.",
         inputSchema: {
           type: "object",
           properties: {
@@ -1518,6 +1534,61 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           end_index?: number;
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          const endIdx = end_index ?? (cells.length - 1);
+          const content = [];
+
+          for (let i = start_index; i <= endIdx && i < cells.length; i++) {
+            const cell = cells[i];
+            const type = getCellType(cell);
+
+            if (cell_type !== "all" && type !== cell_type) continue;
+
+            const cellData: any = {
+              index: i,
+              type,
+              source: extractSource(cell),
+            };
+
+            if (include_outputs && type === "code") {
+              const outputs = cell.outputs;
+              if (outputs) {
+                if (output_format === "text") {
+                  const combinedText = formatOutputsAsText(outputs);
+                  if (combinedText) cellData.output = combinedText;
+                } else {
+                  cellData.outputs = outputs.map((out: any) => {
+                    if (out.data && (out.output_type === "display_data" || out.output_type === "execute_result")) {
+                      return {
+                        output_type: out.output_type,
+                        text: out.data["text/plain"] || "[rich output]",
+                        has_image: !!out.data["image/png"] || !!out.data["image/jpeg"],
+                        has_html: !!out.data["text/html"],
+                      };
+                    }
+                    return out;
+                  });
+                }
+              }
+              cellData.execution_count = cell.execution_count;
+            }
+
+            content.push(cellData);
+          }
+
+          const totalCells = cells.length;
+          const returnedCells = content.length;
+          const summary = `Notebook: ${path} (${totalCells} total cells, returning ${returnedCells}${cell_type !== "all" ? ` ${cell_type} cells` : ""}${include_outputs ? " with outputs" : ""})`;
+
+          return {
+            content: [{ type: "text", text: `${summary}\n\n${JSON.stringify(content, null, 2)}` }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -1609,6 +1680,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cell_type?: string;
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          const newCell: NotebookCell = {
+            cell_type,
+            source,
+            metadata: {},
+            id: crypto.randomUUID(),
+            ...(cell_type === "code" ? { outputs: [], execution_count: null } : {}),
+          };
+
+          let insertIndex: number;
+          if (index === undefined || index === -1) {
+            insertIndex = cells.length;
+          } else if (index < -1) {
+            throw new Error(`Invalid index ${index}. Use -1 to append at end, or 0-${cells.length} to insert at a specific position.`);
+          } else if (index > cells.length) {
+            throw new Error(`Invalid index ${index}. Notebook has ${cells.length} cells. Use 0-${cells.length} or -1 to append.`);
+          } else {
+            insertIndex = index;
+          }
+
+          cells.splice(insertIndex, 0, newCell);
+          await writeNotebook(resolved, notebook);
+
+          const insertDiff = [
+            `--- /dev/null`,
+            `+++ ${path}:cell[${insertIndex}]`,
+            `@@ -0,0 +1,${source.split("\n").length} @@`,
+            ...source.split("\n").map((line) => `+${line}`),
+          ].join("\n");
+
+          return {
+            content: [{ type: "text", text: `Inserted ${cell_type} cell at index ${insertIndex} in ${path}\n\n${insertDiff}` }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -1664,6 +1774,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           source: string;
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          if (index < 0 || index >= notebook.cells.length) {
+            throw new Error(`Invalid cell index ${index}. Notebook has ${notebook.cells.length} cells.`);
+          }
+
+          const oldSource = extractSource(notebook.cells[index]);
+          notebook.cells[index].source = source;
+          await writeNotebook(resolved, notebook);
+
+          const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${index}]`);
+          return {
+            content: [{ type: "text", text: `Updated cell ${index} in ${path}\n\n${truncateDiff(diff)}` }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -1713,6 +1841,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path: string;
           updates: { index: number; source: string }[];
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          for (const update of updates) {
+            if (update.index < 0 || update.index >= notebook.cells.length) {
+              throw new Error(`Invalid cell index ${update.index}. Notebook has ${notebook.cells.length} cells.`);
+            }
+          }
+
+          const diffs: string[] = [];
+          for (const update of updates) {
+            const oldSource = extractSource(notebook.cells[update.index]);
+            notebook.cells[update.index].source = update.source;
+
+            const diff = generateUnifiedDiff(oldSource, update.source, `${path}:cell[${update.index}]`);
+            if (diff !== "(no changes)") {
+              diffs.push(`Cell ${update.index}:\n${truncateDiff(diff)}`);
+            }
+          }
+
+          await writeNotebook(resolved, notebook);
+
+          return {
+            content: [{ type: "text", text: `Updated ${updates.length} cells in ${path}\n\n${diffs.join("\n\n")}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -1770,6 +1926,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "delete_cell": {
         const { path, index } = args as { path: string; index: number };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          if (index < 0 || index >= notebook.cells.length) {
+            throw new Error(`Invalid cell index ${index}. Notebook has ${notebook.cells.length} cells.`);
+          }
+
+          const cell = notebook.cells[index];
+          const oldSource = extractSource(cell);
+          const cellType = getCellType(cell);
+
+          notebook.cells.splice(index, 1);
+          await writeNotebook(resolved, notebook);
+
+          const deleteDiff = [
+            `--- ${path}:cell[${index}]`,
+            `+++ /dev/null`,
+            `@@ -1,${oldSource.split("\n").length} +0,0 @@`,
+            ...oldSource.split("\n").map((line) => `-${line}`),
+          ].join("\n");
+
+          return {
+            content: [{ type: "text", text: `Deleted ${cellType} cell at index ${index} in ${path}\n\n${deleteDiff}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -2171,81 +2354,90 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           max_source_length?: number;
         };
 
-        const sessions = await listNotebookSessions();
-        const session = sessions.find((s) => s.path === path);
-
-        const { doc } = await connectToNotebook(path, session?.kernelId);
-        const cells = doc.getArray("cells");
-
         const regex = createSafeRegex(pattern, case_sensitive);
-
-        // Helper to truncate text
         const truncate = (text: string): string => {
           if (text.length <= max_source_length) return text;
           return text.slice(0, max_source_length) + "...";
         };
 
-        const matches: any[] = [];
+        // Shared search logic for both backends
+        const searchCells = (cells: any[], getCell: (i: number) => any, getOutputs: (cell: any) => any[] | null): any[] => {
+          const matches: any[] = [];
+          for (let i = 0; i < cells.length; i++) {
+            if (max_results !== undefined && matches.length >= max_results) break;
 
-        for (let i = 0; i < cells.length; i++) {
-          // Stop if we've hit max_results
-          if (max_results !== undefined && matches.length >= max_results) break;
+            const cell = getCell(i);
+            const type = getCellType(cell);
+            const source = extractSource(cell);
 
-          const cell = cells.get(i) as any;
-          const type = getCellType(cell);
-          const source = extractSource(cell);
+            const cellMatches: any = { index: i, type };
+            let hasMatch = false;
 
-          const cellMatches: any = {
-            index: i,
-            type,
-          };
-          let hasMatch = false;
-
-          // Search in source
-          if (search_in === "source" || search_in === "all") {
-            const sourceMatches = source.match(regex);
-            if (sourceMatches) {
-              hasMatch = true;
-              cellMatches.source_matches = sourceMatches.length;
-              // Include source with context (truncated)
-              cellMatches.source = truncate(source);
+            if (search_in === "source" || search_in === "all") {
+              const sourceMatches = source.match(regex);
+              if (sourceMatches) {
+                hasMatch = true;
+                cellMatches.source_matches = sourceMatches.length;
+                cellMatches.source = truncate(source);
+              }
             }
-          }
 
-          // Search in outputs (code cells only)
-          if ((search_in === "outputs" || search_in === "all") && type === "code") {
-            const outputs = cell instanceof Y.Map ? cell.get("outputs") : cell?.outputs;
-            if (outputs) {
-              const outputsJson = outputs instanceof Y.Array ? outputs.toJSON() : outputs;
-              const outputTexts: string[] = [];
-
-              for (const out of outputsJson) {
-                if (out.output_type === "stream") {
-                  outputTexts.push(out.text || "");
-                } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
-                  const text = out.data?.["text/plain"];
-                  if (text) outputTexts.push(text);
-                } else if (out.output_type === "error") {
-                  outputTexts.push(`${out.ename}: ${out.evalue}`);
-                  if (out.traceback) {
-                    outputTexts.push(out.traceback.join("\n"));
+            if ((search_in === "outputs" || search_in === "all") && type === "code") {
+              const outputs = getOutputs(cell);
+              if (outputs) {
+                const outputTexts: string[] = [];
+                for (const out of outputs) {
+                  if (out.output_type === "stream") {
+                    outputTexts.push(out.text || "");
+                  } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+                    const text = out.data?.["text/plain"];
+                    if (text) outputTexts.push(text);
+                  } else if (out.output_type === "error") {
+                    outputTexts.push(`${out.ename}: ${out.evalue}`);
+                    if (out.traceback) {
+                      outputTexts.push(out.traceback.join("\n"));
+                    }
                   }
                 }
-              }
-
-              const combinedOutput = outputTexts.join("\n");
-              const outputMatches = combinedOutput.match(regex);
-              if (outputMatches) {
-                hasMatch = true;
-                cellMatches.output_matches = outputMatches.length;
-                cellMatches.output = truncate(combinedOutput);
+                const combinedOutput = outputTexts.join("\n");
+                const outputMatches = combinedOutput.match(regex);
+                if (outputMatches) {
+                  hasMatch = true;
+                  cellMatches.output_matches = outputMatches.length;
+                  cellMatches.output = truncate(combinedOutput);
+                }
               }
             }
-          }
 
-          if (hasMatch) {
-            matches.push(cellMatches);
+            if (hasMatch) matches.push(cellMatches);
           }
+          return matches;
+        };
+
+        let matches: any[];
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          matches = searchCells(
+            notebook.cells,
+            (i) => notebook.cells[i],
+            (cell) => cell.outputs || null,
+          );
+        } else {
+          const sessions = await listNotebookSessions();
+          const session = sessions.find((s) => s.path === path);
+          const { doc } = await connectToNotebook(path, session?.kernelId);
+          const cells = doc.getArray("cells");
+          matches = searchCells(
+            Array.from({ length: cells.length }),
+            (i) => cells.get(i),
+            (cell) => {
+              const outputs = cell instanceof Y.Map ? cell.get("outputs") : cell?.outputs;
+              if (!outputs) return null;
+              return outputs instanceof Y.Array ? outputs.toJSON() : outputs;
+            },
+          );
         }
 
         const summary = `Search for "${pattern}" in ${path}: ${matches.length} cell(s) matched`;
@@ -2283,22 +2475,84 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           dry_run?: boolean;
         };
 
-        const sessions = await listNotebookSessions();
-        const session = sessions.find((s) => s.path === path);
-
-        const { doc } = await connectToNotebook(path, session?.kernelId);
-        const cells = doc.getArray("cells");
-
         // Build search regex
         let searchRegex: RegExp;
         const flags = case_sensitive ? "g" : "gi";
         if (useRegex) {
           searchRegex = createSafeRegex(search, case_sensitive);
         } else {
-          // Escape special regex characters for literal match
           const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           searchRegex = new RegExp(escaped, flags);
         }
+
+        // Helper to build preview
+        const makePreview = (source: string): string => {
+          const firstMatch = source.match(searchRegex);
+          const matchIdx = firstMatch ? source.indexOf(firstMatch[0]) : 0;
+          const contextStart = Math.max(0, matchIdx - 20);
+          const contextEnd = Math.min(source.length, matchIdx + search.length + 20);
+          return (contextStart > 0 ? "..." : "") +
+            source.slice(contextStart, contextEnd).replace(/\n/g, "\\n") +
+            (contextEnd < source.length ? "..." : "");
+        };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          const targetIndices = indices && indices.length > 0
+            ? [...new Set(indices)].sort((a, b) => a - b)
+            : Array.from({ length: cells.length }, (_, i) => i);
+
+          const replacements: { index: number; count: number; preview?: string }[] = [];
+          let totalReplacements = 0;
+
+          for (const i of targetIndices) {
+            if (i < 0 || i >= cells.length) {
+              throw new Error(`Invalid cell index ${i}. Notebook has ${cells.length} cells.`);
+            }
+            const cell = cells[i];
+            const type = getCellType(cell);
+            if (cell_type !== "all" && type !== cell_type) continue;
+
+            const source = extractSource(cell);
+            const matchCount = (source.match(searchRegex) || []).length;
+
+            if (matchCount > 0) {
+              totalReplacements += matchCount;
+              const preview = makePreview(source);
+
+              if (!dry_run) {
+                cell.source = source.replace(searchRegex, replace);
+              }
+              replacements.push({ index: i, count: matchCount, preview });
+            }
+          }
+
+          if (!dry_run && replacements.length > 0) {
+            await writeNotebook(resolved, notebook);
+          }
+
+          const action = dry_run ? "Would replace" : "Replaced";
+          const summary = `${action} "${search}" → "${replace}" in ${path}: ${totalReplacements} occurrence(s) in ${replacements.length} cell(s)`;
+
+          if (replacements.length === 0) {
+            return { content: [{ type: "text", text: `No matches found for "${search}" in ${path}` }] };
+          }
+
+          const details = replacements
+            .map((r) => `  Cell ${r.index}: ${r.count} replacement(s) — ${r.preview}`)
+            .join("\n");
+
+          return { content: [{ type: "text", text: `${summary}\n\n${details}` }] };
+        }
+
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const cells = doc.getArray("cells");
 
         // Determine which cells to process
         const targetIndices = indices && indices.length > 0
@@ -2336,16 +2590,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             }
 
-            // Show preview (first match context)
-            const firstMatch = source.match(searchRegex);
-            const matchIdx = firstMatch ? source.indexOf(firstMatch[0]) : 0;
-            const contextStart = Math.max(0, matchIdx - 20);
-            const contextEnd = Math.min(source.length, matchIdx + search.length + 20);
-            const preview = (contextStart > 0 ? "..." : "") +
-              source.slice(contextStart, contextEnd).replace(/\n/g, "\\n") +
-              (contextEnd < source.length ? "..." : "");
-
-            replacements.push({ index: i, count: matchCount, preview });
+            replacements.push({ index: i, count: matchCount, preview: makePreview(source) });
           }
         }
 
@@ -2374,6 +2619,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "list_files": {
         const { path = "" } = args as { path?: string };
+
+        if (!isJupyterConnected()) {
+          const resolved = path ? resolveNotebookPath(path) : process.cwd();
+          const dirStat = await stat(resolved);
+
+          if (!dirStat.isDirectory()) {
+            // Single file info
+            const fileStat = await stat(resolved);
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  name: resolved.split("/").pop(),
+                  path: resolved,
+                  type: resolved.endsWith(".ipynb") ? "notebook" : "file",
+                  size: fileStat.size,
+                  last_modified: fileStat.mtime.toISOString(),
+                }, null, 2),
+              }],
+            };
+          }
+
+          const entries = await readdir(resolved, { withFileTypes: true });
+          const items = entries.map((entry) => ({
+            name: entry.name,
+            type: entry.isDirectory() ? "directory" : entry.name.endsWith(".ipynb") ? "notebook" : "file",
+            path: join(resolved, entry.name),
+          }));
+
+          items.sort((a, b) => {
+            const typeOrder: Record<string, number> = { directory: 0, notebook: 1, file: 2 };
+            const aOrder = typeOrder[a.type] ?? 3;
+            const bOrder = typeOrder[b.type] ?? 3;
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return a.name.localeCompare(b.name);
+          });
+
+          return {
+            content: [{ type: "text", text: `Files in ${resolved}:\n\n${JSON.stringify(items, null, 2)}` }],
+          };
+        }
 
         const response = await apiFetch(`/api/contents/${encodeURIComponent(path)}`);
         if (!response.ok) {
@@ -2487,6 +2773,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Ensure path ends with .ipynb
         const nbPath = path.endsWith(".ipynb") ? path : `${path}.ipynb`;
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(nbPath);
+
+          // Check if file already exists
+          try {
+            await stat(resolved);
+            throw new Error(`File already exists: ${nbPath}`);
+          } catch (e: any) {
+            if (e.message?.startsWith("File already exists")) throw e;
+            // ENOENT means file doesn't exist - that's what we want
+          }
+
+          const emptyNb = createEmptyNotebook(kernel_name);
+          await writeNotebook(resolved, emptyNb);
+
+          return {
+            content: [{ type: "text", text: `Created notebook: ${nbPath}` }],
+          };
+        }
+
         // Check if file already exists
         const checkResponse = await apiFetch(`/api/contents/${encodeURIComponent(nbPath)}`);
         if (checkResponse.ok) {
@@ -2558,6 +2864,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           indices?: number[];
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          if (indices && indices.length > 0) {
+            const sortedIndices = [...new Set(indices)].sort((a, b) => b - a);
+            for (const idx of sortedIndices) {
+              if (idx < 0 || idx >= cells.length) {
+                throw new Error(`Invalid cell index ${idx}. Notebook has ${cells.length} cells.`);
+              }
+            }
+            for (const idx of sortedIndices) {
+              cells.splice(idx, 1);
+            }
+            await writeNotebook(resolved, notebook);
+            const originalIndices = [...sortedIndices].reverse();
+            return {
+              content: [{ type: "text", text: `Deleted ${sortedIndices.length} cells (indices ${originalIndices.join(", ")}) from ${path}` }],
+            };
+          }
+
+          if (start_index === undefined || end_index === undefined) {
+            throw new Error("Either 'indices' or both 'start_index' and 'end_index' are required.");
+          }
+          if (start_index < 0 || end_index >= cells.length || start_index > end_index) {
+            throw new Error(`Invalid range [${start_index}, ${end_index}]. Notebook has ${cells.length} cells.`);
+          }
+
+          const count = end_index - start_index + 1;
+          cells.splice(start_index, count);
+          await writeNotebook(resolved, notebook);
+
+          return {
+            content: [{ type: "text", text: `Deleted ${count} cells (indices ${start_index}-${end_index}) from ${path}` }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -2618,6 +2962,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           end_index: number;
           dest_index?: number;
         };
+
+        if (!isJupyterConnected()) {
+          const resolvedSrc = resolveNotebookPath(source_path);
+          const resolvedDest = resolveNotebookPath(dest_path);
+          const srcNb = await readNotebook(resolvedSrc);
+          const destNb = resolvedSrc === resolvedDest ? srcNb : await readNotebook(resolvedDest);
+
+          if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
+            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+          }
+
+          const insertAt = dest_index ?? destNb.cells.length;
+          const count = end_index - start_index + 1;
+
+          // Deep copy cells
+          const copiedCells: NotebookCell[] = [];
+          for (let i = start_index; i <= end_index; i++) {
+            const src = srcNb.cells[i];
+            const cellType = src.cell_type || "code";
+            const newCell: NotebookCell = {
+              cell_type: cellType,
+              source: extractSource(src),
+              metadata: {},
+              id: crypto.randomUUID(),
+              ...(cellType === "code" ? { outputs: [], execution_count: null } : {}),
+            };
+            copiedCells.push(newCell);
+          }
+
+          destNb.cells.splice(insertAt, 0, ...copiedCells);
+          await writeNotebook(resolvedDest, destNb);
+
+          const cellSummaries = copiedCells.map((cell, i) => {
+            const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
+            return `  [${insertAt + i}] ${cell.cell_type}: ${preview}`;
+          });
+
+          return {
+            content: [{ type: "text", text: `Copied ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${insertAt}:\n${cellSummaries.join("\n")}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const sourceSession = sessions.find((s) => s.path === source_path);
@@ -2689,6 +3074,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           end_index: number;
           dest_index: number;
         };
+
+        if (!isJupyterConnected()) {
+          const resolvedSrc = resolveNotebookPath(source_path);
+          const resolvedDest = resolveNotebookPath(dest_path);
+          const srcNb = await readNotebook(resolvedSrc);
+          const sameNotebook = resolvedSrc === resolvedDest;
+          const destNb = sameNotebook ? srcNb : await readNotebook(resolvedDest);
+
+          if (start_index < 0 || end_index >= srcNb.cells.length || start_index > end_index) {
+            throw new Error(`Invalid source range [${start_index}, ${end_index}]. Source has ${srcNb.cells.length} cells.`);
+          }
+
+          const count = end_index - start_index + 1;
+
+          // Copy cells content
+          const cellsToMove: NotebookCell[] = [];
+          for (let i = start_index; i <= end_index; i++) {
+            const src = srcNb.cells[i];
+            const cellType = src.cell_type || "code";
+            cellsToMove.push({
+              cell_type: cellType,
+              source: extractSource(src),
+              metadata: {},
+              id: crypto.randomUUID(),
+              ...(cellType === "code" ? { outputs: [], execution_count: null } : {}),
+            });
+          }
+
+          if (sameNotebook) {
+            srcNb.cells.splice(start_index, count);
+            let adjustedDest = dest_index;
+            if (dest_index > start_index) {
+              adjustedDest = Math.max(0, dest_index - count);
+            }
+            srcNb.cells.splice(adjustedDest, 0, ...cellsToMove);
+            await writeNotebook(resolvedSrc, srcNb);
+
+            const cellSummaries = cellsToMove.map((cell, i) => {
+              const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
+              return `  [${adjustedDest + i}] ${cell.cell_type}: ${preview}`;
+            });
+
+            return {
+              content: [{ type: "text", text: `Moved ${count} cell(s) from indices ${start_index}-${end_index} to index ${adjustedDest} in ${source_path}:\n${cellSummaries.join("\n")}` }],
+            };
+          } else {
+            destNb.cells.splice(dest_index, 0, ...cellsToMove);
+            srcNb.cells.splice(start_index, count);
+            await writeNotebook(resolvedSrc, srcNb);
+            await writeNotebook(resolvedDest, destNb);
+
+            const cellSummaries = cellsToMove.map((cell, i) => {
+              const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
+              return `  [${dest_index + i}] ${cell.cell_type}: ${preview}`;
+            });
+
+            return {
+              content: [{ type: "text", text: `Moved ${count} cell(s) from ${source_path}[${start_index}:${end_index}] to ${dest_path} at index ${dest_index}:\n${cellSummaries.join("\n")}` }],
+            };
+          }
+        }
 
         const sessions = await listNotebookSessions();
         const sourceSession = sessions.find((s) => s.path === source_path);
@@ -2793,6 +3239,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           new_type: "code" | "markdown";
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          if (index < 0 || index >= notebook.cells.length) {
+            throw new Error(`Invalid cell index ${index}. Notebook has ${notebook.cells.length} cells.`);
+          }
+
+          const cell = notebook.cells[index];
+          const oldType = cell.cell_type || "code";
+
+          if (oldType === new_type) {
+            return { content: [{ type: "text", text: `Cell ${index} is already type '${new_type}'` }] };
+          }
+
+          cell.cell_type = new_type;
+          if (new_type === "code") {
+            if (!cell.outputs) cell.outputs = [];
+            if (cell.execution_count === undefined) cell.execution_count = null;
+          }
+
+          await writeNotebook(resolved, notebook);
+          return { content: [{ type: "text", text: `Changed cell ${index} from '${oldType}' to '${new_type}'` }] };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -2844,6 +3315,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_notebook_outline": {
         const { path } = args as { path: string };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells;
+
+          const outline: any[] = [];
+          for (let i = 0; i < cells.length; i++) {
+            const cell = cells[i];
+            const type = getCellType(cell);
+            const source = extractSource(cell);
+
+            if (type === "markdown") {
+              const headers = extractMarkdownHeaders(source);
+              for (let h = 0; h < headers.length; h++) {
+                const header = headers[h];
+                const entry: any = { index: i, type: "header", level: header.level, text: header.text };
+                if (headers.length > 1) entry.header_num = h + 1;
+                outline.push(entry);
+              }
+            } else if (type === "code") {
+              outline.push({ index: i, type: "code", preview: getCodePreview(source) });
+            }
+          }
+
+          return {
+            content: [{ type: "text", text: `Outline of ${path} (${cells.length} cells):\n\n${JSON.stringify(outline, null, 2)}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -2969,6 +3469,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "clear_outputs": {
         const { path, index } = args as { path: string; index?: number };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          if (index !== undefined) {
+            if (index < 0 || index >= notebook.cells.length) {
+              throw new Error(`Invalid cell index ${index}. Notebook has ${notebook.cells.length} cells.`);
+            }
+            const cell = notebook.cells[index];
+            cell.outputs = [];
+            cell.execution_count = null;
+            await writeNotebook(resolved, notebook);
+            return { content: [{ type: "text", text: `Cleared outputs from cell ${index} in ${path}` }] };
+          } else {
+            let clearedCount = 0;
+            for (const cell of notebook.cells) {
+              if (getCellType(cell) === "code") {
+                if (cell.outputs && cell.outputs.length > 0) {
+                  clearedCount++;
+                }
+                cell.outputs = [];
+                cell.execution_count = null;
+              }
+            }
+            await writeNotebook(resolved, notebook);
+            const message = clearedCount === 0
+              ? `No cells had outputs to clear in ${path}`
+              : `Cleared outputs from ${clearedCount} cell${clearedCount === 1 ? "" : "s"} in ${path}`;
+            return { content: [{ type: "text", text: message }] };
+          }
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -3033,6 +3565,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           end_index?: number;
           indices?: number[];
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const { indices: cellIndices, description } = resolveCellIndices(notebook.cells.length, { index, end_index, indices });
+
+          const results: any[] = [];
+          for (const idx of cellIndices) {
+            const cell = notebook.cells[idx];
+            const type = getCellType(cell);
+
+            if (type !== "code") {
+              results.push({ index: idx, type, outputs: "(not a code cell)" });
+              continue;
+            }
+
+            const executionCount = cell.execution_count;
+            const outputs = cell.outputs;
+
+            if (!outputs || outputs.length === 0) {
+              const status = executionCount === null || executionCount === undefined ? "(not executed)" : "(no output)";
+              results.push({ index: idx, type, execution_count: executionCount, outputs: status });
+              continue;
+            }
+
+            const textParts: string[] = [];
+            for (const out of outputs) {
+              if (out.output_type === "stream") {
+                textParts.push(out.text || "");
+              } else if (out.output_type === "execute_result" || out.output_type === "display_data") {
+                if (out.data?.["text/plain"]) textParts.push(out.data["text/plain"]);
+              } else if (out.output_type === "error") {
+                textParts.push(`${out.ename}: ${out.evalue}`);
+              }
+            }
+
+            results.push({
+              index: idx,
+              type,
+              execution_count: executionCount,
+              text: textParts.join(""),
+              output_count: outputs.length,
+            });
+          }
+
+          return {
+            content: [{ type: "text", text: `Outputs from ${description} in ${path}:\n\n${JSON.stringify(results, null, 2)}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -3126,6 +3708,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           indices?: number[];
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const resolved2 = resolveCellIndices(notebook.cells.length, { index, end_index, indices });
+          const results: any[] = [];
+          for (const i of resolved2.indices) {
+            const metadataJson = notebook.cells[i].metadata || {};
+            results.push({ index: i, metadata: metadataJson, tags: metadataJson.tags || [] });
+          }
+
+          return {
+            content: [{
+              type: "text",
+              text: results.length === 1
+                ? `Cell ${resolved2.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
+                : `Metadata for ${resolved2.description}:\n${JSON.stringify(results, null, 2)}`,
+            }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -3166,6 +3769,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           indices?: number[];
           metadata: Record<string, any>;
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices });
+
+          for (const i of resolvedIndices.indices) {
+            const cell = notebook.cells[i];
+            if (!cell.metadata) cell.metadata = {};
+
+            for (const [key, value] of Object.entries(metadata)) {
+              if (value === null) {
+                delete cell.metadata[key];
+              } else {
+                cell.metadata[key] = value;
+              }
+            }
+          }
+
+          await writeNotebook(resolved, notebook);
+          return { content: [{ type: "text", text: `Updated metadata on ${resolvedIndices.description}` }] };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -3222,6 +3848,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           indices?: number[];
           tags: string[];
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices });
+
+          for (const i of resolvedIndices.indices) {
+            const cell = notebook.cells[i];
+            if (!cell.metadata) cell.metadata = {};
+            if (!Array.isArray(cell.metadata.tags)) cell.metadata.tags = [];
+            for (const tag of tags) {
+              if (!cell.metadata.tags.includes(tag)) {
+                cell.metadata.tags.push(tag);
+              }
+            }
+          }
+
+          await writeNotebook(resolved, notebook);
+          return { content: [{ type: "text", text: `Added tags [${tags.join(", ")}] to ${resolvedIndices.description}` }] };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -3284,6 +3931,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           tags: string[];
         };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices });
+
+          for (const i of resolvedIndices.indices) {
+            const cell = notebook.cells[i];
+            if (!cell.metadata?.tags || !Array.isArray(cell.metadata.tags)) continue;
+            cell.metadata.tags = cell.metadata.tags.filter((t: string) => !tags.includes(t));
+          }
+
+          await writeNotebook(resolved, notebook);
+          return { content: [{ type: "text", text: `Removed tags [${tags.join(", ")}] from ${resolvedIndices.description}` }] };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -3335,6 +3998,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           match_all?: boolean;
           include_preview?: boolean;
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          const matches: { index: number; type: string; tags: string[]; preview?: string }[] = [];
+          for (let i = 0; i < notebook.cells.length; i++) {
+            const cell = notebook.cells[i];
+            const type = getCellType(cell);
+            const cellTags: string[] = Array.isArray(cell.metadata?.tags) ? cell.metadata.tags : [];
+            if (cellTags.length === 0) continue;
+
+            const hasMatch = match_all
+              ? tags.every((t) => cellTags.includes(t))
+              : tags.some((t) => cellTags.includes(t));
+
+            if (hasMatch) {
+              const result: { index: number; type: string; tags: string[]; preview?: string } = { index: i, type, tags: cellTags };
+              if (include_preview) result.preview = getCodePreview(extractSource(cell));
+              matches.push(result);
+            }
+          }
+
+          return {
+            content: [{ type: "text", text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}` }],
+          };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -3392,6 +4082,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_notebook_metadata": {
         const { path } = args as { path: string };
 
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          return {
+            content: [{ type: "text", text: `Notebook metadata for ${path}:\n${JSON.stringify(notebook.metadata, null, 2)}` }],
+          };
+        }
+
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
 
@@ -3416,6 +4114,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           path: string;
           metadata: Record<string, any>;
         };
+
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+
+          for (const [key, value] of Object.entries(metadata)) {
+            if (value === null) {
+              delete notebook.metadata[key];
+            } else {
+              notebook.metadata[key] = value;
+            }
+          }
+
+          await writeNotebook(resolved, notebook);
+          return { content: [{ type: "text", text: `Updated notebook metadata for ${path}` }] };
+        }
 
         const sessions = await listNotebookSessions();
         const session = sessions.find((s) => s.path === path);
@@ -3468,6 +4182,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("New path must end in .ipynb");
         }
 
+        if (!isJupyterConnected()) {
+          const resolvedOld = resolveNotebookPath(path);
+          const resolvedNew = resolveNotebookPath(new_path);
+          await fsRename(resolvedOld, resolvedNew);
+          return { content: [{ type: "text", text: `Renamed ${path} to ${new_path}` }] };
+        }
+
         // Disconnect from notebook if connected
         const existing = connectedNotebooks.get(path);
         if (existing) {
@@ -3504,6 +4225,83 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           summary_only?: boolean;
           max_diffs?: number;
         };
+
+        if (!isJupyterConnected()) {
+          const resolved1 = resolveNotebookPath(path1);
+          const resolved2 = resolveNotebookPath(path2);
+          const nb1 = await readNotebook(resolved1);
+          const nb2 = await readNotebook(resolved2);
+
+          const diffs: string[] = [];
+          let sourceDiffs = 0, typeDiffs = 0, outputDiffs = 0, onlyIn1 = 0, onlyIn2 = 0;
+
+          const maxCells = Math.max(nb1.cells.length, nb2.cells.length);
+          for (let i = 0; i < maxCells; i++) {
+            const cell1 = i < nb1.cells.length ? nb1.cells[i] : null;
+            const cell2 = i < nb2.cells.length ? nb2.cells[i] : null;
+
+            if (!cell1) {
+              onlyIn2++;
+              if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                diffs.push(`[${i}] Only in ${path2}: ${getCellType(cell2)} cell`);
+              }
+              continue;
+            }
+            if (!cell2) {
+              onlyIn1++;
+              if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                diffs.push(`[${i}] Only in ${path1}: ${getCellType(cell1)} cell`);
+              }
+              continue;
+            }
+
+            const type1 = getCellType(cell1);
+            const type2 = getCellType(cell2);
+            if (type1 !== type2) {
+              typeDiffs++;
+              if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                diffs.push(`[${i}] Type differs: ${type1} vs ${type2}`);
+              }
+            }
+
+            const source1 = extractSource(cell1);
+            const source2 = extractSource(cell2);
+            if (source1 !== source2) {
+              sourceDiffs++;
+              if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                const preview1 = source1.slice(0, 50).replace(/\n/g, "\\n");
+                const preview2 = source2.slice(0, 50).replace(/\n/g, "\\n");
+                diffs.push(`[${i}] Source differs:\n  ${path1}: "${preview1}..."\n  ${path2}: "${preview2}..."`);
+              }
+            }
+
+            if (include_outputs && type1 === "code") {
+              const out1 = JSON.stringify(cell1.outputs || []);
+              const out2 = JSON.stringify(cell2.outputs || []);
+              if (out1 !== out2) {
+                outputDiffs++;
+                if (!summary_only && (!max_diffs || diffs.length < max_diffs)) {
+                  diffs.push(`[${i}] Outputs differ`);
+                }
+              }
+            }
+          }
+
+          const totalDiffs = sourceDiffs + typeDiffs + outputDiffs + onlyIn1 + onlyIn2;
+          const diffSummary = `Summary: ${totalDiffs} differences (${sourceDiffs} source, ${typeDiffs} type, ${outputDiffs} output, ${onlyIn1} only in ${path1}, ${onlyIn2} only in ${path2})`;
+
+          let resultText: string;
+          if (totalDiffs === 0) {
+            resultText = `Notebooks ${path1} and ${path2} are identical`;
+          } else if (summary_only) {
+            resultText = diffSummary;
+          } else {
+            const shownDiffs = max_diffs && diffs.length >= max_diffs ? `\n\n(showing first ${max_diffs} of ${totalDiffs} differences)` : "";
+            resultText = `${diffSummary}\n\n${diffs.join("\n\n")}${shownDiffs}`;
+          }
+
+          return { content: [{ type: "text", text: resultText }] };
+        }
 
         const sessions = await listNotebookSessions();
         const session1 = sessions.find((s) => s.path === path1);
@@ -3811,43 +4609,63 @@ del _vars, _name, _obj, _type, _repr
       case "get_diagnostics": {
         const { path, cell_index } = args as { path: string; cell_index?: number };
 
-        const sessions = await listNotebookSessions();
-        const session = sessions.find((s) => s.path === path);
+        // Helper to collect sources from cells
+        let cellSources: { index: number; source: string }[];
+        let sessionForKernel: NotebookSession | undefined;
 
-        const { doc } = await connectToNotebook(path, session?.kernelId);
-        const cells = doc.getArray("cells");
+        if (!isJupyterConnected()) {
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
 
-        // Determine which cells to check
-        const indicesToCheck: number[] = [];
-        if (cell_index !== undefined) {
-          if (cell_index < 0 || cell_index >= cells.length) {
-            throw new Error(`Invalid cell index ${cell_index}. Notebook has ${cells.length} cells.`);
-          }
-          indicesToCheck.push(cell_index);
-        } else {
-          for (let i = 0; i < cells.length; i++) {
-            const cell = cells.get(i) as Y.Map<any>;
-            if (getCellType(cell) === "code") {
-              indicesToCheck.push(i);
+          if (cell_index !== undefined) {
+            if (cell_index < 0 || cell_index >= notebook.cells.length) {
+              throw new Error(`Invalid cell index ${cell_index}. Notebook has ${notebook.cells.length} cells.`);
+            }
+            cellSources = [{ index: cell_index, source: extractSource(notebook.cells[cell_index]) }];
+          } else {
+            cellSources = [];
+            for (let i = 0; i < notebook.cells.length; i++) {
+              if (getCellType(notebook.cells[i]) === "code") {
+                cellSources.push({ index: i, source: extractSource(notebook.cells[i]) });
+              }
             }
           }
+        } else {
+          const sessions = await listNotebookSessions();
+          sessionForKernel = sessions.find((s) => s.path === path);
+
+          const { doc } = await connectToNotebook(path, sessionForKernel?.kernelId);
+          const cells = doc.getArray("cells");
+
+          if (cell_index !== undefined) {
+            if (cell_index < 0 || cell_index >= cells.length) {
+              throw new Error(`Invalid cell index ${cell_index}. Notebook has ${cells.length} cells.`);
+            }
+            cellSources = [{ index: cell_index, source: extractSource(cells.get(cell_index) as any) }];
+          } else {
+            cellSources = [];
+            for (let i = 0; i < cells.length; i++) {
+              const cell = cells.get(i) as Y.Map<any>;
+              if (getCellType(cell) === "code") {
+                cellSources.push({ index: i, source: extractSource(cell) });
+              }
+            }
+          }
+
+          // Try LSP first if available
+          const languageServer = getLanguageServerForFile(path);
+          if (lspStatus.available && languageServer) {
+            // Fall through to syntax check for now
+          }
         }
 
-        // Try LSP first if available
-        const languageServer = getLanguageServerForFile(path);
-        if (lspStatus.available && languageServer) {
-          // For LSP, we'd need to get diagnostics from the virtual document
-          // This requires the notebook to be open in JupyterLab with LSP active
-          // For now, fall through to syntax check
-        }
+        const indicesToCheck = cellSources.map((c) => c.index);
 
         // Use ruff via uvx for fast, comprehensive diagnostics (no kernel needed)
         const diagnostics: { cell: number; line: number; column?: number; code: string; message: string; severity: string }[] = [];
         let diagnosticMethod: "ruff" | "syntax" | "none" = "none";
 
-        for (const idx of indicesToCheck) {
-          const cell = cells.get(idx) as Y.Map<any>;
-          const source = extractSource(cell);
+        for (const { index: idx, source } of cellSources) {
           if (!source.trim()) continue;
 
           try {
@@ -3897,7 +4715,7 @@ del _vars, _name, _obj, _type, _repr
             // If uvx/ruff not available, fall back to basic syntax check
             if (e.code === "ENOENT" || e.message?.includes("spawn")) {
               // uvx not found - try kernel-based syntax check
-              if (session?.kernelId) {
+              if (sessionForKernel?.kernelId) {
                 const checkCode = `
 try:
     compile(${JSON.stringify(source)}, '<cell ${idx}>', 'exec')
@@ -3906,7 +4724,7 @@ except SyntaxError as e:
     print(f"SYNTAX:{e.lineno or 1}:{e.msg}")
 `;
                 try {
-                  const kernelResult = await executeCode(session.kernelId, checkCode, 5000);
+                  const kernelResult = await executeCode(sessionForKernel.kernelId, checkCode, 5000);
                   diagnosticMethod = "syntax";
                   const output = kernelResult.text.trim();
                   if (output.startsWith("SYNTAX:")) {
