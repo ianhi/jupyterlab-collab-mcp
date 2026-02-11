@@ -20,7 +20,7 @@ export default defineConfig({
           "https://github.com/ianhi/jupyterlab-collab-mcp/edit/main/docs/",
       },
       sidebar: [
-        { label: "jlab-mcp Launcher", slug: "jlab-mcp" },
+        { label: "jlabx Launcher", slug: "jlab-mcp" },
         {
           label: "Tools",
           items: [

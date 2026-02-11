@@ -20,14 +20,11 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "jupyter-mcp": "dist/index.js",
-    "jlab-mcp": "bin/jlab-mcp",
-    "jupyter-collab": "bin/jlab-mcp"
+    "jupyter-mcp": "dist/index.js"
   },
   "files": [
     "dist",
-    "src",
-    "bin"
+    "src"
   ],
   "scripts": {
     "build": "tsc",

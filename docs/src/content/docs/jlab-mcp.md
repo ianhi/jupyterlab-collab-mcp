@@ -1,33 +1,31 @@
 ---
-title: jlab-mcp Launcher
-description: Launch JupyterLab with all the right extensions for MCP collaboration.
+title: jlabx Launcher
+description: Launch JupyterLab with all the right extensions — no install, no config, just go.
 ---
 
-The `jlab-mcp` launcher starts JupyterLab with all the extensions needed for MCP collaboration, without modifying your project's dependencies. Also available as `jupyter-collab`.
+The [`jlabx`](https://github.com/ianhi/jlabx) launcher starts JupyterLab with all the extensions needed for MCP collaboration, without modifying your project's dependencies. It's a separate project — no Node.js required.
 
 ## Install
 
 ```bash
-# Recommended — installs the jlab-mcp command globally
-uv tool install jlab-mcp
+# Recommended
+uv tool install jlabx
 
 # Or via pipx
-pipx install jlab-mcp
+pipx install jlabx
 ```
-
-No Node.js required. The launcher is a standalone Python package.
 
 ## Usage
 
 ```bash
 # Launch JupyterLab
-jlab-mcp
+jlabx
 
 # Skip user extensions (core only, useful for debugging)
-jlab-mcp --no-extras
+jlabx --no-extras
 
 # Pass arguments through to jupyter lab
-jlab-mcp --no-browser --ip=0.0.0.0
+jlabx --no-browser --ip=0.0.0.0
 ```
 
 ## Core extensions
@@ -45,20 +43,20 @@ Use subcommands to manage user extensions without editing the config file:
 
 ```bash
 # List all configured extensions
-jlab-mcp list
+jlabx list
 
 # Add extensions
-jlab-mcp add jupyterlab-drawio jupyterlab-execute-time
+jlabx add jupyterlab-drawio jupyterlab-execute-time
 
 # Remove extensions
-jlab-mcp remove jupyterlab-vim
+jlabx remove jupyterlab-vim
 ```
 
 Duplicates are detected automatically. Changes take effect on the next launch.
 
 ## Config file
 
-On first run, `jlab-mcp` creates `~/.config/jlab-mcp/config.toml` with defaults:
+On first run, `jlabx` creates `~/.config/jlabx/config.toml` with defaults:
 
 ```toml
 extensions = [
@@ -83,8 +81,8 @@ The launcher auto-detects your environment:
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/) is preferred (fast, native binary)
-- If `uv` is not installed but `npx` is available, the script falls back to [`@manzt/uv`](https://github.com/manzt/uv-npm) (npx will prompt before installing)
-- If neither is found, the script prints install instructions and exits
+- If `uv` is not installed but `npx` is available, the launcher falls back to [`@manzt/uv`](https://github.com/manzt/uv-npm) (npx will prompt before installing)
+- If neither is found, it prints install instructions and exits
 
 ## Options
 
@@ -96,7 +94,7 @@ The launcher auto-detects your environment:
 All other arguments are passed through to `jupyter lab`:
 
 ```bash
-JUPYTER_PORT=9999 jlab-mcp --no-browser --ip=0.0.0.0
+JUPYTER_PORT=9999 jlabx --no-browser --ip=0.0.0.0
 ```
 
-The script handles Ctrl+C gracefully, force-killing JupyterLab if it hangs during shutdown.
+The launcher handles Ctrl+C gracefully, force-killing JupyterLab if it hangs during shutdown.

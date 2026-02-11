@@ -33,7 +33,7 @@ This project was developed independently before we discovered [datalayer/jupyter
 claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
 
 # Launch JupyterLab with collaboration extensions
-uv tool install jlab-mcp && jlab-mcp
+uv tool install jlabx && jlabx
 
 # Connect by pasting the URL
 "Connect to http://localhost:8888/lab?token=abc123"

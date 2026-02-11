@@ -11,7 +11,7 @@ Claude Code  ←—stdio—→  MCP Server  ←—y-websocket—→  JupyterLab
 Claude Code can already edit files, but notebooks are special — they have cells, kernels, outputs, and a live browser UI. This MCP server bridges the gap:
 
 - **Real-time sync** — edits appear instantly in JupyterLab via y-websocket
-- **51 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
+- **52 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
 - **Cell ID addressing** — stable references that survive insertions and deletions
 - **Multi-agent ready** — cell locking, change tracking, and per-agent attribution
 - **Context-efficient** — filter by cell type, skip outputs, limit images
@@ -48,22 +48,19 @@ claude mcp add -s user jupyter -- node $PWD/dist/index.js
 
 ## Usage
 
-1. Start JupyterLab with `jlab-mcp` (or `jupyter lab` if you already have `jupyter-collaboration` installed)
+1. Start JupyterLab with [`jlabx`](https://github.com/ianhi/jlabx) (or `jupyter lab` if you already have `jupyter-collaboration` installed)
 2. In Claude Code: _"Connect to http://localhost:8888/lab?token=..."_
 3. Ask Claude to read, edit, or run cells
 
 Most tools also work **without** a JupyterLab connection by reading/writing `.ipynb` files directly (no kernel operations in this mode).
 
-## jlab-mcp launcher
+## jlabx launcher
 
-The `jlab-mcp` command (also available as `jupyter-collab`) launches JupyterLab with all the right extensions (collaboration, LSP, vim, MyST, git) without modifying your project dependencies. Requires [uv](https://docs.astral.sh/uv/).
+[`jlabx`](https://github.com/ianhi/jlabx) launches JupyterLab with all the right extensions (collaboration, LSP, vim, MyST, git) without modifying your project dependencies.
 
 ```bash
-# If installed via npm
-jlab-mcp
-
-# Or via npx (no install needed)
-npx jupyterlab-collab-mcp jlab-mcp
+uv tool install jlabx
+jlabx
 ```
 
 ## Documentation
