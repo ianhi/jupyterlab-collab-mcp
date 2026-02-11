@@ -524,12 +524,23 @@ export const toolSchemas = [
           type: "number",
           description: "Last cell index to copy (inclusive)",
         },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Cell IDs to copy (alternative to start_index/end_index). More robust in concurrent editing.",
+        },
         dest_index: {
           type: "number",
           description: "Position in destination to insert cells. Default: end",
         },
+        dest_cell_id: {
+          type: "string",
+          description:
+            "Insert after this cell ID in destination (alternative to dest_index).",
+        },
       },
-      required: ["source_path", "dest_path", "start_index", "end_index"],
+      required: ["source_path", "dest_path"],
     },
   },
   {
@@ -555,12 +566,23 @@ export const toolSchemas = [
           type: "number",
           description: "Last cell index to move (inclusive)",
         },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Cell IDs to move (alternative to start_index/end_index). More robust in concurrent editing.",
+        },
         dest_index: {
           type: "number",
           description: "Position in destination to insert cells",
         },
+        dest_cell_id: {
+          type: "string",
+          description:
+            "Insert after this cell ID in destination (alternative to dest_index).",
+        },
       },
-      required: ["source_path", "dest_path", "start_index", "end_index", "dest_index"],
+      required: ["source_path", "dest_path"],
     },
   },
   {
@@ -652,6 +674,12 @@ export const toolSchemas = [
         end_index: {
           type: "number",
           description: "Last cell index to execute (inclusive). Default: last cell",
+        },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Cell IDs to execute in order (alternative to start_index/end_index). More robust in concurrent editing.",
         },
         timeout: {
           type: "number",
@@ -1286,6 +1314,79 @@ export const toolSchemas = [
         },
       },
       required: ["path", "name"],
+    },
+  },
+  // ================================================================
+  // Cell locking tools
+  // ================================================================
+  {
+    name: "lock_cells",
+    description:
+      "Acquire advisory locks on cells to prevent accidental overwrites by other agents. Locks auto-expire after 5 minutes (configurable). Other agents see a warning when trying to modify locked cells.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Cell IDs to lock (prefix match supported)",
+        },
+        owner: {
+          type: "string",
+          description: "Who is claiming these cells (e.g. agent name). Default: 'claude-code'",
+        },
+        ttl_minutes: {
+          type: "number",
+          description: "Lock duration in minutes. Default: 5",
+        },
+      },
+      required: ["path", "cell_ids"],
+    },
+  },
+  {
+    name: "unlock_cells",
+    description:
+      "Release advisory locks on cells. Only the lock owner can release (use force=true to override).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Cell IDs to unlock",
+        },
+        owner: {
+          type: "string",
+          description: "Who is releasing (must match lock owner). Default: 'claude-code'",
+        },
+        force: {
+          type: "boolean",
+          description: "Force unlock regardless of owner. Default: false",
+        },
+      },
+      required: ["path", "cell_ids"],
+    },
+  },
+  {
+    name: "list_locks",
+    description: "List all active cell locks for a notebook. Shows who holds each lock and when it expires.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+      },
+      required: ["path"],
     },
   },
 ];
