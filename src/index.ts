@@ -356,6 +356,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIdShort: newId,
             cellIndex: insertIndex,
             newSource: source,
+            client: "claude-code",
           });
           const insertDiff = [
             `--- /dev/null`,
@@ -413,6 +414,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIdShort: newCellId.slice(0, 8),
           cellIndex: insertIndex,
           newSource: source,
+          client: "claude-code",
         });
 
         // Show what was inserted
@@ -470,6 +472,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIndex: resolvedIndex,
             oldSource,
             newSource: source,
+            client: "claude-code",
           });
           const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
           return {
@@ -528,6 +531,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIndex: resolvedIndex,
           oldSource,
           newSource: source,
+          client: "claude-code",
         });
 
         const diff = generateUnifiedDiff(
@@ -668,6 +672,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             cellIdShort: cellIdStr || "",
             cellIndex: resolvedIndex,
             oldSource,
+            client: "claude-code",
           });
 
           notebook.cells.splice(resolvedIndex, 1);
@@ -725,6 +730,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cellIdShort: cellIdStr || "",
           cellIndex: resolvedIndex,
           oldSource,
+          client: "claude-code",
         });
 
         cells.delete(resolvedIndex, 1);
@@ -3941,6 +3947,7 @@ del _target, _result_parts
             cellIndex: idx,
             newSource: deleted.source,
             detail: `recovered from deleted cell ${cell_id}`,
+            client: "claude-code",
           });
 
           return {
@@ -3976,6 +3983,7 @@ del _target, _result_parts
           cellIndex: idx,
           newSource: deleted.source,
           detail: `recovered from deleted cell ${cell_id}`,
+          client: "claude-code",
         });
 
         return {
@@ -4033,6 +4041,7 @@ del _target, _result_parts
             cellIdShort: "",
             cellIndex: -1,
             detail: `restored snapshot '${snapName}' (${restored} cells)`,
+            client: "claude-code",
           });
 
           return {
