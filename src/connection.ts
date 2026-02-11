@@ -12,12 +12,15 @@ import crypto from "node:crypto";
 import type { NotebookOutput, ExecutionResult } from "./helpers.js";
 
 // ============================================================================
-// State and config
+// Instance identity — unique per MCP server process
 // ============================================================================
 
-// Unique instance ID — generated once at MCP server startup.
-// Used to distinguish multiple MCP server instances connected to the same notebook.
+/** Unique identifier for this MCP server instance. Stable for the process lifetime. */
 export const instanceId = crypto.randomUUID();
+
+// ============================================================================
+// State and config
+// ============================================================================
 
 // Dynamic configuration - set via connect_jupyter tool
 export type JupyterConfig = {

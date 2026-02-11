@@ -30,3 +30,8 @@ __pycache__/
 
 # Test environment (local only)
 test-jupyter/
+
+# Docs build artifacts
+docs/dist/
+docs/node_modules/
+docs/.astro/

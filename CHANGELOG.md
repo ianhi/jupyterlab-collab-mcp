@@ -2,14 +2,34 @@
 
 All notable changes to the JupyterLab Claude Code MCP server.
 
-## [Unreleased]
+## [0.8.0] - 2025-02-11
 
 ### Added
 - **Multi-instance shared state via Yjs** — cell locks, change tracking, and snapshots now sync across MCP server instances connected to the same notebook
   - When connected to JupyterLab, shared state is stored in Yjs maps on the notebook document (`mcp_locks`, `mcp_changes`, `mcp_snapshots`)
   - When using filesystem mode, existing in-memory backends are used (no behavior change)
   - Instance identity: each MCP server gets a UUID, visible in JupyterLab's awareness/collaborators panel
-- **Refactored index.ts** into modular handler files under `src/handlers/` for maintainability
+- Documentation site built with Starlight/Astro
+- Concise README that links to full docs
+
+## [0.7.0] - 2025-02-11
+
+### Added
+- Change tracking for `copy_cells` and `move_cells` operations
+- `batch_insert_cells` tool for inserting multiple cells in one operation
+- `client_name` parameter on `recover_cell` and `batch_update_cells`
+
+### Changed
+- Default lock TTL increased from 5 minutes to 10 minutes
+
+### Fixed
+- `recover_cell` now accepts `client_name` for proper attribution (previously hardcoded to "claude-code")
+
+## [0.6.0] - 2025-02-11
+
+### Changed
+- **Refactored index.ts** into modular handler files under `src/handlers/` (7 files, 51 tool handlers)
+- index.ts reduced from ~2000 lines to a 96-line dispatcher
 
 ## [0.5.0] - 2025-02-11
 
