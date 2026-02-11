@@ -11,6 +11,7 @@ import {
   truncateDiff,
   getCodePreview,
   checkHumanFocus,
+  formatTimeRemaining,
 } from "../helpers.js";
 import {
   readNotebook,
@@ -243,7 +244,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
-          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires in ${formatTimeRemaining(Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000))}). Use force=true to override.`);
         }
         lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
       }
@@ -291,10 +292,12 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "batch_update_cells": async (args) => {
-    const { path, updates } = args as {
+    const { path, updates, client_name } = args as {
       path: string;
       updates: { index: number; source: string }[];
+      client_name?: string;
     };
+    const clientId = client_name || "claude-code";
 
     if (!isJupyterConnected()) {
       const resolved = resolveNotebookPath(path);
@@ -308,8 +311,20 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       const diffs: string[] = [];
       for (const update of updates) {
-        const oldSource = extractSource(notebook.cells[update.index]);
-        notebook.cells[update.index].source = update.source;
+        const cell = notebook.cells[update.index];
+        const oldSource = extractSource(cell);
+        cell.source = update.source;
+
+        const cellIdStr = truncatedCellId(cell);
+        recordChange(path, {
+          operation: "update",
+          cellId: getCellId(cell) || "",
+          cellIdShort: cellIdStr || "",
+          cellIndex: update.index,
+          oldSource,
+          newSource: update.source,
+          client: clientId,
+        });
 
         const diff = generateUnifiedDiff(oldSource, update.source, `${path}:cell[${update.index}]`);
         if (diff !== "(no changes)") {
@@ -340,6 +355,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const diffs: string[] = [];
+    const changeRecords: { cellId: string; cellIdShort: string; index: number; oldSource: string; newSource: string }[] = [];
 
     // Apply all updates in a transaction for atomicity
     doc.transact(() => {
@@ -357,6 +373,14 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           }
         }
 
+        changeRecords.push({
+          cellId: getCellId(cell) || "",
+          cellIdShort: truncatedCellId(cell) || "",
+          index: update.index,
+          oldSource,
+          newSource: update.source,
+        });
+
         const diff = generateUnifiedDiff(
           oldSource,
           update.source,
@@ -368,11 +392,163 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       }
     });
 
+    // Record changes after transaction completes
+    for (const rec of changeRecords) {
+      recordChange(path, {
+        operation: "update",
+        cellId: rec.cellId,
+        cellIdShort: rec.cellIdShort,
+        cellIndex: rec.index,
+        oldSource: rec.oldSource,
+        newSource: rec.newSource,
+        client: clientId,
+      });
+    }
+
     return {
       content: [
         {
           type: "text",
           text: `Updated ${updates.length} cells in ${path}\n\n${diffs.join("\n\n")}`,
+        },
+      ],
+    };
+  },
+
+  "batch_insert_cells": async (args) => {
+    const { path, inserts, client_name } = args as {
+      path: string;
+      inserts: { source: string; cell_type?: string; cell_id?: string; index?: number }[];
+      client_name?: string;
+    };
+    const clientId = client_name || "claude-code";
+
+    if (!isJupyterConnected()) {
+      const resolved = resolveNotebookPath(path);
+      const notebook = await readNotebook(resolved);
+      const cells = notebook.cells;
+
+      const results: string[] = [];
+      let offset = 0;
+
+      for (const ins of inserts) {
+        const cellType = ins.cell_type || "code";
+        const newCell: NotebookCell = {
+          cell_type: cellType,
+          source: ins.source,
+          metadata: {},
+          id: crypto.randomUUID(),
+          ...(cellType === "code" ? { outputs: [], execution_count: null } : {}),
+        };
+
+        // Resolve insert position
+        let insertIndex: number;
+        if (ins.cell_id !== undefined) {
+          if (ins.index !== undefined) throw new Error("Specify either 'index' or 'cell_id' per insert, not both.");
+          insertIndex = resolveCellId(cells, ins.cell_id) + 1; // insert after
+        } else if (ins.index === undefined || ins.index === -1) {
+          insertIndex = cells.length;
+        } else {
+          insertIndex = ins.index + offset;
+        }
+
+        if (insertIndex < 0 || insertIndex > cells.length) {
+          throw new Error(`Invalid index ${insertIndex}. Notebook has ${cells.length} cells.`);
+        }
+
+        cells.splice(insertIndex, 0, newCell);
+        offset++;
+
+        const newId = (newCell.id || "").slice(0, 8);
+        recordChange(path, {
+          operation: "insert",
+          cellId: newCell.id || "",
+          cellIdShort: newId,
+          cellIndex: insertIndex,
+          newSource: ins.source,
+          client: clientId,
+        });
+
+        const insertDiff = [
+          `--- /dev/null`,
+          `+++ ${path}:cell[${insertIndex}]`,
+          `@@ -0,0 +1,${ins.source.split("\n").length} @@`,
+          ...ins.source.split("\n").map((line) => `+${line}`),
+        ].join("\n");
+        results.push(`Cell ${insertIndex} (${newId}) ${cellType}:\n${insertDiff}`);
+      }
+
+      await writeNotebook(resolved, notebook);
+
+      return {
+        content: [{ type: "text", text: `Inserted ${inserts.length} cells in ${path}\n\n${results.join("\n\n")}` }],
+      };
+    }
+
+    const sessions = await listNotebookSessions();
+    const session = sessions.find((s) => s.path === path);
+
+    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const cells = doc.getArray("cells");
+
+    const results: string[] = [];
+    let offset = 0;
+
+    for (const ins of inserts) {
+      const cellType = ins.cell_type || "code";
+      const newCell = new Y.Map();
+      newCell.set("cell_type", cellType);
+      newCell.set("source", new Y.Text(ins.source));
+      newCell.set("metadata", new Y.Map());
+      if (cellType === "code") {
+        newCell.set("outputs", new Y.Array());
+        newCell.set("execution_count", null);
+      }
+      const newCellId = crypto.randomUUID();
+      newCell.set("id", newCellId);
+
+      // Resolve insert position
+      let insertIndex: number;
+      if (ins.cell_id !== undefined) {
+        if (ins.index !== undefined) throw new Error("Specify either 'index' or 'cell_id' per insert, not both.");
+        insertIndex = resolveCellId(cells, ins.cell_id) + 1; // insert after
+      } else if (ins.index === undefined || ins.index === -1) {
+        insertIndex = cells.length;
+      } else {
+        insertIndex = ins.index + offset;
+      }
+
+      if (insertIndex < 0 || insertIndex > cells.length) {
+        throw new Error(`Invalid index ${insertIndex}. Notebook has ${cells.length} cells.`);
+      }
+
+      cells.insert(insertIndex, [newCell]);
+      offset++;
+
+      const newId = newCellId.slice(0, 8);
+      recordChange(path, {
+        operation: "insert",
+        cellId: newCellId,
+        cellIdShort: newId,
+        cellIndex: insertIndex,
+        newSource: ins.source,
+        client: clientId,
+      });
+
+      const insertDiff = [
+        `--- /dev/null`,
+        `+++ ${path}:cell[${insertIndex}]`,
+        `@@ -0,0 +1,${ins.source.split("\n").length} @@`,
+        ...ins.source.split("\n").map((line) => `+${line}`),
+      ].join("\n");
+      results.push(`Cell ${insertIndex} (${newId}) ${cellType}:\n${insertDiff}`);
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Inserted ${inserts.length} cells in ${path}\n\n${results.join("\n\n")}`,
         },
       ],
     };
@@ -471,7 +647,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
-          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires in ${formatTimeRemaining(Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000))}). Use force=true to override.`);
         }
         lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
       }

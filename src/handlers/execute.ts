@@ -13,6 +13,7 @@ import {
   generateUnifiedDiff,
   truncateDiff,
   checkHumanFocus,
+  formatTimeRemaining,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
 import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode } from "../connection.js";
@@ -240,7 +241,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
-          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires ${new Date(lock.expiresAt).toLocaleTimeString()}). Use force=true to override.`);
+          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires in ${formatTimeRemaining(Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000))}). Use force=true to override.`);
         }
         lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
       }

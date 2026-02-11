@@ -4,6 +4,7 @@ import {
   getCellId,
   resolveCellId,
   generateUnifiedDiff,
+  formatTimeRemaining,
 } from "../helpers.js";
 import {
   readNotebook,
@@ -111,11 +112,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "recover_cell": async (args) => {
-    const { path, cell_id, index: insertAt } = args as {
+    const { path, cell_id, index: insertAt, client_name } = args as {
       path: string;
       cell_id: string;
       index?: number;
+      client_name?: string;
     };
+    const clientId = client_name || "claude-code";
 
     const deleted = getDeletedCellSource(path, cell_id);
     if (!deleted) {
@@ -155,7 +158,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         cellIndex: idx,
         newSource: deleted.source,
         detail: `recovered from deleted cell ${cell_id}`,
-        client: "claude-code",
+        client: clientId,
       });
 
       return {
@@ -191,7 +194,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cellIndex: idx,
       newSource: deleted.source,
       detail: `recovered from deleted cell ${cell_id}`,
-      client: "claude-code",
+      client: clientId,
     });
 
     return {
@@ -375,7 +378,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     if (result.acquired.length > 0) {
       lines.push(`Locked ${result.acquired.length} cell(s) for "${owner}" (expires in ${ttl_minutes} min):`);
       for (const lock of result.acquired) {
-        lines.push(`  ${lock.cellId.slice(0, 8)} — locked until ${new Date(lock.expiresAt).toLocaleTimeString()}`);
+        const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
+        lines.push(`  ${lock.cellId.slice(0, 8)} — expires in ${formatTimeRemaining(remaining)}`);
       }
     }
     if (result.blocked.length > 0) {

@@ -18,6 +18,7 @@ import {
 import {
   extractSource,
   getCellType,
+  getCellId,
   resolveCellIndices,
   createSafeRegex,
   extractMarkdownHeaders,
@@ -25,6 +26,9 @@ import {
   formatOutputsAsText,
   generateUnifiedDiff,
 } from "./helpers.js";
+import { handlers as cellWriteHandlers } from "./handlers/cell-write.js";
+import { handlers as collabHandlers } from "./handlers/collab.js";
+import { getChangesSince, clearTracker } from "./cell-tracker.js";
 
 const FIXTURES = join(import.meta.dirname, "..", "test", "fixtures");
 
@@ -744,5 +748,191 @@ describe("error cases (filesystem)", () => {
 
   it("resolveCellIndices throws for negative index in indices array", () => {
     expect(() => resolveCellIndices(5, { indices: [-1] })).toThrow();
+  });
+});
+
+describe("batch_insert_cells (filesystem)", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "nb-batchins-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("inserts multiple cells at end", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    clearTracker(path);
+
+    const result = await cellWriteHandlers["batch_insert_cells"]({
+      path,
+      inserts: [
+        { source: "print('first')" },
+        { source: "print('second')" },
+      ],
+      client_name: "test-agent",
+    });
+
+    const first = result.content[0];
+    const text = first.type === "text" ? first.text : "";
+    expect(text).toContain("Inserted 2 cells");
+
+    const nb = await readNotebook(path);
+    // Original has 7 cells, now should have 9
+    expect(nb.cells.length).toBe(9);
+    expect(extractSource(nb.cells[7])).toBe("print('first')");
+    expect(extractSource(nb.cells[8])).toBe("print('second')");
+
+    // Check change tracking
+    const { changes } = getChangesSince(path, 0, 100);
+    expect(changes.length).toBe(2);
+    expect(changes[0].operation).toBe("insert");
+    expect(changes[0].client).toBe("test-agent");
+    expect(changes[1].operation).toBe("insert");
+    expect(changes[1].client).toBe("test-agent");
+  });
+
+  it("inserts at specific index with offset tracking", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    clearTracker(path);
+
+    await cellWriteHandlers["batch_insert_cells"]({
+      path,
+      inserts: [
+        { source: "cell_A", index: 0 },
+        { source: "cell_B", index: 0 },
+      ],
+    });
+
+    const nb = await readNotebook(path);
+    // Both specified index 0, but offset should shift the second one
+    // First insert: index 0 + offset 0 = 0
+    // Second insert: index 0 + offset 1 = 1
+    expect(extractSource(nb.cells[0])).toBe("cell_A");
+    expect(extractSource(nb.cells[1])).toBe("cell_B");
+  });
+
+  it("inserts markdown cells", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+
+    await cellWriteHandlers["batch_insert_cells"]({
+      path,
+      inserts: [
+        { source: "# Header", cell_type: "markdown" },
+      ],
+    });
+
+    const nb = await readNotebook(path);
+    const last = nb.cells[nb.cells.length - 1];
+    expect(last.cell_type).toBe("markdown");
+    expect(extractSource(last)).toBe("# Header");
+  });
+
+  it("rejects conflicting index + cell_id", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    const nb = await readNotebook(path);
+    const firstId = getCellId(nb.cells[0])!.slice(0, 8);
+
+    await expect(
+      cellWriteHandlers["batch_insert_cells"]({
+        path,
+        inserts: [{ source: "bad", index: 0, cell_id: firstId }],
+      })
+    ).rejects.toThrow("Specify either 'index' or 'cell_id'");
+  });
+});
+
+describe("batch_update_cells change tracking (filesystem)", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "nb-batchupd-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("tracks changes for each updated cell", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    clearTracker(path);
+
+    await cellWriteHandlers["batch_update_cells"]({
+      path,
+      updates: [
+        { index: 1, source: "updated_cell_1" },
+        { index: 2, source: "updated_cell_2" },
+      ],
+      client_name: "batch-agent",
+    });
+
+    const { changes } = getChangesSince(path, 0, 100);
+    expect(changes.length).toBe(2);
+    expect(changes[0].operation).toBe("update");
+    expect(changes[0].client).toBe("batch-agent");
+    expect(changes[0].newSource).toBe("updated_cell_1");
+    expect(changes[1].operation).toBe("update");
+    expect(changes[1].client).toBe("batch-agent");
+    expect(changes[1].newSource).toBe("updated_cell_2");
+  });
+
+  it("defaults client_name to claude-code", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    clearTracker(path);
+
+    await cellWriteHandlers["batch_update_cells"]({
+      path,
+      updates: [{ index: 1, source: "new" }],
+    });
+
+    const { changes } = getChangesSince(path, 0, 100);
+    expect(changes[0].client).toBe("claude-code");
+  });
+});
+
+describe("recover_cell client_name (filesystem)", () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "nb-recover-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("uses provided client_name for attribution", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    const nb = await readNotebook(path);
+    const cellId = getCellId(nb.cells[1])!;
+    const cellIdShort = cellId.slice(0, 8);
+
+    // Record a delete so recover_cell has something to recover
+    clearTracker(path);
+    const { recordChange } = await import("./cell-tracker.js");
+    recordChange(path, {
+      operation: "delete",
+      cellId,
+      cellIdShort,
+      cellIndex: 1,
+      oldSource: "import os",
+    });
+
+    const result = await collabHandlers["recover_cell"]({
+      path,
+      cell_id: cellIdShort,
+      client_name: "recovery-agent",
+    });
+
+    const first = result.content[0];
+    expect(first.type === "text" && first.text).toContain("Recovered");
+
+    // Check the restore change was attributed correctly
+    const { changes } = getChangesSince(path, 0, 100);
+    const restoreChange = changes.find((c) => c.operation === "restore");
+    expect(restoreChange).toBeDefined();
+    expect(restoreChange!.client).toBe("recovery-agent");
   });
 });

@@ -15,6 +15,7 @@ import {
   getCodePreview,
   extractOutputsWithTraceback,
   truncateDiff,
+  formatTimeRemaining,
   type ExecutionResult,
 } from "./helpers.js";
 
@@ -837,5 +838,35 @@ describe("truncateDiff", () => {
     const result = truncateDiff(diff, 30);
 
     expect(result).toContain("... 1 lines omitted ...");
+  });
+});
+
+describe("formatTimeRemaining", () => {
+  it("formats zero seconds", () => {
+    expect(formatTimeRemaining(0)).toBe("0s");
+  });
+
+  it("formats negative values as 0s", () => {
+    expect(formatTimeRemaining(-5)).toBe("0s");
+  });
+
+  it("formats seconds only", () => {
+    expect(formatTimeRemaining(45)).toBe("45s");
+  });
+
+  it("formats minutes and seconds", () => {
+    expect(formatTimeRemaining(330)).toBe("5m 30s");
+  });
+
+  it("formats exact minutes", () => {
+    expect(formatTimeRemaining(120)).toBe("2m 0s");
+  });
+
+  it("formats large values", () => {
+    expect(formatTimeRemaining(3661)).toBe("61m 1s");
+  });
+
+  it("rounds fractional seconds", () => {
+    expect(formatTimeRemaining(59.7)).toBe("1m 0s");
   });
 });

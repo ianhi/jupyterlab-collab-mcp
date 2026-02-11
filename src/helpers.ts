@@ -506,6 +506,21 @@ export function truncateDiff(diff: string, maxLines: number = 30): string {
 }
 
 /**
+ * Format a number of seconds as a human-readable relative time string.
+ * Examples: "5m 30s", "2m 0s", "45s", "0s"
+ */
+export function formatTimeRemaining(totalSeconds: number): string {
+  if (totalSeconds <= 0) return "0s";
+  const rounded = Math.round(totalSeconds);
+  const minutes = Math.floor(rounded / 60);
+  const seconds = rounded % 60;
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
  * Build MCP content array from execution result, with image limiting.
  * Returns the content array for the MCP response.
  */

@@ -413,8 +413,55 @@ export const toolSchemas = [
           },
           description: "Array of {index, source} updates to apply",
         },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
+        },
       },
       required: ["path", "updates"],
+    },
+  },
+  {
+    name: "batch_insert_cells",
+    description:
+      "Insert multiple cells at once. More efficient than calling insert_cell repeatedly. Inserts are applied in order; each subsequent insert accounts for prior insertions. Returns diffs for each inserted cell.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        inserts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              source: { type: "string", description: "Cell source code" },
+              cell_type: {
+                type: "string",
+                enum: ["code", "markdown"],
+                description: "Cell type (default: code)",
+              },
+              cell_id: {
+                type: "string",
+                description: "Insert after the cell with this ID (alternative to index).",
+              },
+              index: {
+                type: "number",
+                description: "Position to insert (0 = beginning, -1 or omit = end)",
+              },
+            },
+            required: ["source"],
+          },
+          description: "Array of cells to insert in order",
+        },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
+        },
+      },
+      required: ["path", "inserts"],
     },
   },
   {
@@ -1262,6 +1309,10 @@ export const toolSchemas = [
         index: {
           type: "number",
           description: "Position to re-insert the cell. Default: end of notebook",
+        },
+        client_name: {
+          type: "string",
+          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
         },
       },
       required: ["path", "cell_id"],
