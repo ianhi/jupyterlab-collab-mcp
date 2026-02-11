@@ -16,11 +16,14 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 src/
 ├── index.ts        # MCP server entry point + tool handlers
 ├── connection.ts   # JupyterLab connection state, config, session management, kernel execution
-├── schemas.ts      # Tool schema definitions (all 41 tools)
+├── schemas.ts      # Tool schema definitions (all 44+ tools)
 ├── tool-helpers.ts # Shared handler patterns (getNotebookCells, resolveIndexParam, etc.)
 ├── helpers.ts      # Shared utilities (cell extraction, diffing, output formatting)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb without JupyterLab)
 ├── rename.ts       # Scope-aware Python rename via jedi
+├── cell-tracker.ts # In-memory per-notebook change tracking with version numbers
+├── snapshots.ts    # Named notebook checkpoints (save/restore/diff)
+├── cell-locks.ts   # Advisory cell locking with auto-expiry
 └── test.ts         # Standalone test script
 ```
 
@@ -60,8 +63,19 @@ src/
 | `diff_notebooks` | Compare two notebooks cell by cell |
 | `rename_symbol` | Scope-aware Python rename across cells (via jedi) |
 | `get_kernel_status` | Check if kernel is idle/busy/dead |
+| `get_kernel_variables` | List variables in kernel (names, types, values) |
 | `interrupt_kernel` | Stop running execution |
 | `restart_kernel` | Restart kernel (clears all state) |
+| `get_cell_history` | View change log for a specific cell |
+| `get_notebook_changes` | Poll for changes since a version number |
+| `recover_cell` | Re-insert a deleted cell from change history |
+| `snapshot_notebook` | Save a named checkpoint |
+| `restore_snapshot` | Restore notebook to a checkpoint |
+| `list_snapshots` | List all checkpoints for a notebook |
+| `diff_snapshot` | Compare checkpoint vs current state |
+| `lock_cells` | Acquire advisory locks on cells |
+| `unlock_cells` | Release advisory locks |
+| `list_locks` | List active cell locks |
 
 ### Cell IDs (Stable Addressing)
 
@@ -77,7 +91,7 @@ Cell IDs are prefix-matched — use enough characters to be unambiguous. IDs sta
 
 Tools with `cell_id`: `update_cell`, `delete_cell`, `execute_cell`, `change_cell_type`, `insert_cell` (after), `insert_and_execute` (after), `update_and_execute`, `clear_outputs`, `get_diagnostics`.
 
-Tools with `cell_ids` array: `get_notebook_content`, `get_cell_outputs`, `get_cell_metadata`, `set_cell_metadata`, `add_cell_tags`, `remove_cell_tags`, `delete_cells`.
+Tools with `cell_ids` array: `get_notebook_content`, `get_cell_outputs`, `get_cell_metadata`, `set_cell_metadata`, `add_cell_tags`, `remove_cell_tags`, `delete_cells`, `copy_cells`, `move_cells`, `execute_range`, `lock_cells`, `unlock_cells`.
 
 ### Human-Focus Protection
 
@@ -88,6 +102,43 @@ Cannot modify cell 5 (a3f8c2d1) — user "Ian" is currently editing it. Use forc
 ```
 
 Applied to: `update_cell`, `update_and_execute`, `delete_cell`, `change_cell_type`, `clear_outputs`. Use `force=true` to bypass.
+
+### Cell Locking (Advisory)
+
+Agents can claim cells to prevent accidental overwrites. Locks are advisory and auto-expire (default 5 minutes):
+
+```
+lock_cells(path, cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="data-agent", ttl_minutes=10)
+unlock_cells(path, cell_ids=["a3f8c2d1"], owner="data-agent")
+list_locks(path)  # see all active locks
+```
+
+Write tools (`update_cell`, `delete_cell`) check locks and warn if another owner holds the lock. Use `force=true` to override. Locks are session-scoped (cleared on server restart).
+
+### Change Tracking
+
+All cell modifications are tracked in-memory with version numbers, timestamps, and client attribution:
+
+```
+get_cell_history(path, cell_id="a3f8c2d1", limit=10)  # changes to one cell
+get_notebook_changes(path, since_version=5)             # poll for all changes since version 5
+recover_cell(path, cell_id="a3f8c2d1")                  # re-insert a deleted cell from history
+```
+
+Agents can use `get_notebook_changes` for polling-based change detection: call once with `since_version=0` to get the current version, then poll with the last known version to get incremental updates.
+
+### Snapshots (Checkpoints)
+
+Save and restore named checkpoints:
+
+```
+snapshot_notebook(path, name="before-refactor", description="optional note")
+list_snapshots(path)
+diff_snapshot(path, name="before-refactor")   # see what changed since checkpoint
+restore_snapshot(path, name="before-refactor") # auto-saves pre-restore backup
+```
+
+Works in both Jupyter and filesystem modes. Snapshots are in-memory (session-scoped).
 
 ### Image Output Control
 
