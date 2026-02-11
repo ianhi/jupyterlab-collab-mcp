@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the JupyterLab Claude Code MCP server.
+All notable changes to the jupyterlab-collab-mcp.
 
 ## [0.8.0] - 2025-02-11
 

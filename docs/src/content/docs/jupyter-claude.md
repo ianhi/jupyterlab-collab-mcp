@@ -9,7 +9,7 @@ The `jupyter-claude` script is a convenience launcher that starts JupyterLab wit
 
 ```bash
 # Add to your PATH (one-time setup)
-export PATH="/path/to/jupyterlab-claude-code/bin:$PATH"
+export PATH="/path/to/jupyterlab-collab-mcp/bin:$PATH"
 
 # Launch from any directory
 jupyter-claude

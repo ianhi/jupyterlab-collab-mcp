@@ -1,18 +1,18 @@
 {
-  "name": "jupyterlab-claude-code",
+  "name": "jupyterlab-collab-mcp",
   "version": "0.8.0",
-  "description": "MCP server for JupyterLab notebook collaboration with Claude Code",
+  "description": "MCP server for real-time JupyterLab notebook collaboration",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ianhi/jupyterlab-claude-code.git"
+    "url": "https://github.com/ianhi/jupyterlab-collab-mcp.git"
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "jupyterlab",
     "jupyter",
     "notebook",
-    "claude",
     "ai",
     "real-time",
     "collaboration"

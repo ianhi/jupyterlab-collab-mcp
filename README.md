@@ -1,6 +1,6 @@
-# JupyterLab + Claude Code
+# JupyterLab Collab MCP
 
-Give Claude Code full access to your Jupyter notebooks — read, edit, execute, and collaborate in real-time.
+Give AI assistants full access to your Jupyter notebooks — read, edit, execute, and collaborate in real-time.
 
 ```
 Claude Code  ←—stdio—→  MCP Server  ←—y-websocket—→  JupyterLab
@@ -24,7 +24,7 @@ Claude Code can already edit files, but notebooks are special — they have cell
 Requires [Node.js 18+](https://nodejs.org/). No cloning or building needed:
 
 ```bash
-claude mcp add -s user jupyter -- npx jupyterlab-claude-code
+claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
 ```
 
 That's it. `npx` downloads and caches the package automatically.
@@ -34,14 +34,14 @@ That's it. `npx` downloads and caches the package automatically.
 If you don't have Node.js installed, the [`deno`](https://pypi.org/project/deno/) PyPI package bundles Deno — a JavaScript runtime with built-in npm compatibility:
 
 ```bash
-claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-claude-code
+claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-collab-mcp
 ```
 
 ### From source (development)
 
 ```bash
-git clone https://github.com/ianhi/jupyterlab-claude-code.git
-cd jupyterlab-claude-code
+git clone https://github.com/ianhi/jupyterlab-collab-mcp.git
+cd jupyterlab-collab-mcp
 npm install && npm run build
 claude mcp add -s user jupyter -- node $PWD/dist/index.js
 ```
@@ -60,19 +60,19 @@ Most tools also work **without** a JupyterLab connection by reading/writing `.ip
 The `bin/jupyter-claude` script launches JupyterLab with all the right extensions (collaboration, LSP, vim, MyST, git) without modifying your project dependencies. Requires [uv](https://docs.astral.sh/uv/).
 
 ```bash
-export PATH="/path/to/jupyterlab-claude-code/bin:$PATH"
+export PATH="/path/to/jupyterlab-collab-mcp/bin:$PATH"
 jupyter-claude
 ```
 
 ## Documentation
 
-**Full docs: https://ianhi.github.io/jupyterlab-claude-code/**
+**Full docs: https://ianhi.github.io/jupyterlab-collab-mcp/**
 
 The docs site has detailed tool reference pages, parameter tables, examples, and guides for multi-agent collaboration.
 
 ## Related Projects
 
-See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) — a Python-based alternative with Streamable HTTP transport and streaming execution. See the [comparison page](https://ianhi.github.io/jupyterlab-claude-code/comparison/) for detailed differences.
+See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) — a Python-based alternative with Streamable HTTP transport and streaming execution. See the [comparison page](https://ianhi.github.io/jupyterlab-collab-mcp/comparison/) for detailed differences.
 
 ## License
 

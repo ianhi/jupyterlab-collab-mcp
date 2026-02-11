@@ -3,21 +3,21 @@ import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   site: "https://ianhi.github.io",
-  base: "/jupyterlab-claude-code",
+  base: "/jupyterlab-collab-mcp",
   integrations: [
     starlight({
-      title: "JupyterLab Claude Code",
+      title: "JupyterLab Collab MCP",
       customCss: ["./src/styles/custom.css"],
       social: [
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/ianhi/jupyterlab-claude-code",
+          href: "https://github.com/ianhi/jupyterlab-collab-mcp",
         },
       ],
       editLink: {
         baseUrl:
-          "https://github.com/ianhi/jupyterlab-claude-code/edit/main/docs/",
+          "https://github.com/ianhi/jupyterlab-collab-mcp/edit/main/docs/",
       },
       sidebar: [
         { label: "jupyter-claude Launcher", slug: "jupyter-claude" },

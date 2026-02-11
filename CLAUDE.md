@@ -1,4 +1,4 @@
-# JupyterLab + Claude Code Integration
+# JupyterLab Collab MCP
 
 ## Project Overview
 
@@ -208,14 +208,14 @@ Unlike `replace_in_notebook`, this understands Python semantics — it won't ren
 
 ```bash
 # With npx (recommended)
-claude mcp add -s user jupyter -- npx jupyterlab-claude-code
+claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
 
 # With uvx (no Node.js required)
-claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-claude-code
+claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-collab-mcp
 
 # From source (development)
-git clone https://github.com/ianhi/jupyterlab-claude-code.git
-cd jupyterlab-claude-code
+git clone https://github.com/ianhi/jupyterlab-collab-mcp.git
+cd jupyterlab-collab-mcp
 npm install && npm run build
 claude mcp add -s user jupyter -- node $PWD/dist/index.js
 ```

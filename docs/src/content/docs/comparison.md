@@ -7,7 +7,7 @@ This project was developed independently before we discovered [datalayer/jupyter
 
 ## Quick comparison
 
-| Aspect | jupyterlab-claude-code | jupyter-mcp-server |
+| Aspect | jupyterlab-collab-mcp | jupyter-mcp-server |
 |--------|----------------------|-------------------|
 | Language | TypeScript | Python |
 | Install | `git clone` + `npm install` | `pip install` + config |
@@ -70,7 +70,7 @@ Comprehensive coverage: batch operations, cross-notebook copy/move, cell ID addr
 
 ## When to use which
 
-**Use jupyterlab-claude-code when:**
+**Use jupyterlab-collab-mcp when:**
 - You want the simplest setup
 - You need search, cell locking, or change tracking
 - You're running multi-agent workflows

@@ -45,7 +45,7 @@ const allHandlers: Record<string, (args: Record<string, unknown>) => Promise<any
 
 const server = new Server(
   {
-    name: "jupyterlab-claude-code",
+    name: "jupyterlab-collab-mcp",
     version: "0.1.0",
   },
   {

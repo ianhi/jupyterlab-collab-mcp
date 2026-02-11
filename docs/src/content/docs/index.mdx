@@ -1,11 +1,11 @@
 ---
-title: JupyterLab + Claude Code
-description: An MCP server for real-time Jupyter notebook collaboration with Claude Code. Changes sync instantly — no reloading.
+title: JupyterLab Collab MCP
+description: An MCP server for real-time Jupyter notebook collaboration. Changes sync instantly — no reloading.
 ---
 
 import { Steps, Aside } from "@astrojs/starlight/components";
 
-An MCP server that lets Claude Code read, edit, and execute Jupyter notebooks with real-time collaboration. Changes appear instantly in your browser — no reloading. Claude sees where your cursor is and won't touch the cell you're editing.
+An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Changes appear instantly in your browser — no reloading. Claude sees where your cursor is and won't touch the cell you're editing.
 
 {/* TODO: Add demo GIF here */}
 {/* <img src="/demo.gif" alt="Demo of Claude Code editing a notebook in real-time" /> */}
@@ -38,20 +38,20 @@ pip install jupyter-collaboration
    **With npx (recommended)** — requires [Node.js 18+](https://nodejs.org/):
 
    ```bash
-   claude mcp add -s user jupyter -- npx jupyterlab-claude-code
+   claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
    ```
 
    **With uvx (no Node.js required)** — uses the [`deno`](https://pypi.org/project/deno/) PyPI package:
 
    ```bash
-   claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-claude-code
+   claude mcp add -s user jupyter -- uvx deno -A npm:jupyterlab-collab-mcp
    ```
 
    **From source (development)**:
 
    ```bash
-   git clone https://github.com/ianhi/jupyterlab-claude-code.git
-   cd jupyterlab-claude-code
+   git clone https://github.com/ianhi/jupyterlab-collab-mcp.git
+   cd jupyterlab-collab-mcp
    npm install && npm run build
    claude mcp add -s user jupyter -- node $PWD/dist/index.js
    ```

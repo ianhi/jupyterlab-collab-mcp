@@ -1,9 +1,9 @@
 ---
 title: Changelog
-description: Version history for jupyterlab-claude-code.
+description: Version history for jupyterlab-collab-mcp.
 ---
 
-All notable changes to the JupyterLab Claude Code MCP server.
+All notable changes to the jupyterlab-collab-mcp.
 
 ## [0.8.0] - 2025-02-11
 

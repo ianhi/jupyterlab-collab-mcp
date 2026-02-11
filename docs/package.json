@@ -1,5 +1,5 @@
 {
-  "name": "jupyterlab-claude-code-docs",
+  "name": "jupyterlab-collab-mcp-docs",
   "private": true,
   "type": "module",
   "scripts": {

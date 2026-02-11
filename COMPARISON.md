@@ -1,10 +1,10 @@
-# Comparison: jupyterlab-claude-code vs datalayer/jupyter-mcp-server
+# Comparison: jupyterlab-collab-mcp vs datalayer/jupyter-mcp-server
 
 This document compares our implementation with the existing [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server).
 
 ## Quick Summary
 
-| Aspect | Ours (jupyterlab-claude-code) | Theirs (jupyter-mcp-server) |
+| Aspect | Ours (jupyterlab-collab-mcp) | Theirs (jupyter-mcp-server) |
 |--------|-------------------------------|------------------------------|
 | Language | TypeScript | Python |
 | Install | `git clone` + `npm install` | `pip install` + config |
@@ -25,7 +25,7 @@ This document compares our implementation with the existing [datalayer/jupyter-m
 ### 1. Simpler Installation
 ```bash
 # Ours - one command
-claude mcp add jupyter -- npx jupyterlab-claude-code
+claude mcp add jupyter -- npx jupyterlab-collab-mcp
 
 # Theirs - multiple steps
 pip install jupyter-mcp-server
@@ -135,7 +135,7 @@ If contributing to jupyter-mcp-server:
 
 ## When to Use Which
 
-**Use ours (jupyterlab-claude-code) when:**
+**Use ours (jupyterlab-collab-mcp) when:**
 - You want the simplest possible setup
 - You need search/grep through notebooks
 - You want cursor awareness
