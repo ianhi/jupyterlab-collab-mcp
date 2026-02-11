@@ -4,21 +4,28 @@
 
 A TypeScript MCP server that connects to JupyterLab's real-time collaboration system, allowing Claude Code to read, edit, and execute notebooks in real-time. Changes sync bidirectionally with the JupyterLab browser interface.
 
+**Dual mode**: Most tools work in two modes automatically:
+- **Jupyter mode**: Connect via `connect_jupyter` for real-time sync and kernel operations
+- **Filesystem mode**: Read/write `.ipynb` files directly without JupyterLab (no kernel needed)
+
 ## Architecture
 
 **Key insight**: No custom JupyterLab extension is needed. We use `y-websocket` to connect directly to the existing `jupyter-collaboration` endpoints.
 
 ```
 src/
-├── index.ts    # MCP server (stdio transport)
-└── test.ts     # Standalone test script
+├── index.ts        # MCP server (stdio transport)
+├── helpers.ts      # Shared utilities (cell extraction, diffing, output formatting)
+├── notebook-fs.ts  # Filesystem backend (read/write .ipynb without JupyterLab)
+├── rename.ts       # Scope-aware Python rename via jedi
+└── test.ts         # Standalone test script
 ```
 
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `connect_jupyter` | Connect to JupyterLab with URL (call first!) |
+| `connect_jupyter` | Connect to JupyterLab with URL (needed for kernel ops) |
 | `list_files` | List files/notebooks in a directory |
 | `list_notebooks` | List open notebooks with active kernels |
 | `open_notebook` | Open a notebook and start its kernel |
@@ -48,6 +55,7 @@ src/
 | `set_notebook_metadata` | Set notebook-level metadata |
 | `rename_notebook` | Rename a notebook file |
 | `diff_notebooks` | Compare two notebooks cell by cell |
+| `rename_symbol` | Scope-aware Python rename across cells (via jedi) |
 | `get_kernel_status` | Check if kernel is idle/busy/dead |
 | `interrupt_kernel` | Stop running execution |
 | `restart_kernel` | Restart kernel (clears all state) |
@@ -88,6 +96,20 @@ case_sensitive: false (default)
 
 Returns matching cells with their source and/or output text. Useful for finding errors, tracebacks, or specific values.
 
+### Scope-Aware Rename
+
+`rename_symbol` renames Python symbols across all cells using jedi for scope analysis:
+
+```
+path: notebook path
+cell_index: which cell contains the symbol (0-indexed)
+line: line within the cell (0-indexed)
+character: column within the line (0-indexed)
+new_name: the new name for the symbol
+```
+
+Unlike `replace_in_notebook`, this understands Python semantics — it won't rename occurrences in strings, comments, or unrelated scopes. Requires jedi (auto-installed via `uvx`, or install with `pip install jedi`).
+
 ## Installation
 
 ```bash
@@ -106,6 +128,7 @@ No token in config - just paste your JupyterLab URL when connecting:
 - **@modelcontextprotocol/sdk** for MCP server
 - **y-websocket** for Yjs sync (same protocol as JupyterLab frontend)
 - **yjs** for CRDT data structures
+- **jedi** (Python, via subprocess) for scope-aware rename
 
 ## Development
 
