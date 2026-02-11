@@ -35,3 +35,9 @@ test-jupyter/
 docs/dist/
 docs/node_modules/
 docs/.astro/
+
+# Test coverage
+coverage/
+
+# Local test subproject
+lorenz-collab/

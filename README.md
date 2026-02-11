@@ -66,13 +66,13 @@ jupyter-claude
 
 ## Documentation
 
-**Full docs: https://jupyterlab-claude-code.pages.dev/**
+**Full docs: https://ianhi.github.io/jupyterlab-claude-code/**
 
 The docs site has detailed tool reference pages, parameter tables, examples, and guides for multi-agent collaboration.
 
 ## Related Projects
 
-See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) — a Python-based alternative with Streamable HTTP transport and streaming execution. See the [comparison page](https://jupyterlab-claude-code.pages.dev/comparison/) for detailed differences.
+See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) — a Python-based alternative with Streamable HTTP transport and streaming execution. See the [comparison page](https://ianhi.github.io/jupyterlab-claude-code/comparison/) for detailed differences.
 
 ## License
 
