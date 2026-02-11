@@ -5,6 +5,10 @@ All notable changes to the JupyterLab Claude Code MCP server.
 ## [Unreleased]
 
 ### Added
+- **Multi-instance shared state via Yjs** — cell locks, change tracking, and snapshots now sync across MCP server instances connected to the same notebook
+  - When connected to JupyterLab, shared state is stored in Yjs maps on the notebook document (`mcp_locks`, `mcp_changes`, `mcp_snapshots`)
+  - When using filesystem mode, existing in-memory backends are used (no behavior change)
+  - Instance identity: each MCP server gets a UUID, visible in JupyterLab's awareness/collaborators panel
 - **Refactored index.ts** into modular handler files under `src/handlers/` for maintainability
 
 ## [0.5.0] - 2025-02-11
