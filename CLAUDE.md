@@ -94,7 +94,7 @@ Returns matching cells with their source and/or output text. Useful for finding 
 git clone https://github.com/ianhi/jupyterlab-claude-code.git
 cd jupyterlab-claude-code
 npm install && npm run build
-claude mcp add jupyter -- node $PWD/dist/index.js
+claude mcp add -s user jupyter -- node $PWD/dist/index.js
 ```
 
 No token in config - just paste your JupyterLab URL when connecting:
