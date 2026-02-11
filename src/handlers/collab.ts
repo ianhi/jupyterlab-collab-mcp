@@ -351,7 +351,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "lock_cells": async (args) => {
-    const { path, cell_ids: lockCellIds, owner = "claude-code", ttl_minutes = 5 } = args as {
+    const { path, cell_ids: lockCellIds, owner = "claude-code", ttl_minutes = 10 } = args as {
       path: string;
       cell_ids: string[];
       owner?: string;

@@ -31,7 +31,7 @@ export interface CellLock {
 
 const locks = new Map<string, CellLock>();
 
-const DEFAULT_LOCK_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_LOCK_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function lockKey(path: string, cellId: string): string {
   return `${path}:${cellId}`;

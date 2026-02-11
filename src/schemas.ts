@@ -551,6 +551,11 @@ export const toolSchemas = [
           description:
             "Insert after this cell ID in destination (alternative to dest_index).",
         },
+        client_name: {
+          type: "string",
+          description:
+            "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
+        },
       },
       required: ["source_path", "dest_path"],
     },
@@ -592,6 +597,11 @@ export const toolSchemas = [
           type: "string",
           description:
             "Insert after this cell ID in destination (alternative to dest_index).",
+        },
+        client_name: {
+          type: "string",
+          description:
+            "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
         },
       },
       required: ["source_path", "dest_path"],
@@ -671,7 +681,7 @@ export const toolSchemas = [
   {
     name: "execute_range",
     description:
-      "Execute multiple cells in sequence. Requires JupyterLab connection. Continues on error (doesn't stop). Returns status per cell. Useful for running a section or the entire notebook.",
+      "Execute multiple cells in sequence. Requires JupyterLab connection. Continues on error (doesn't stop). Automatically skips markdown and empty cells. Returns status per cell. Useful for running a section or the entire notebook.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1342,7 +1352,7 @@ export const toolSchemas = [
   {
     name: "lock_cells",
     description:
-      "Acquire advisory locks on cells to prevent accidental overwrites by other agents. Locks auto-expire after 5 minutes (configurable). Other agents see a warning when trying to modify locked cells.",
+      "Acquire advisory locks on cells to prevent accidental overwrites by other agents. Locks auto-expire after 10 minutes (configurable). Calling again with the same owner renews the lock TTL. Other agents see a warning when trying to modify locked cells.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1361,7 +1371,7 @@ export const toolSchemas = [
         },
         ttl_minutes: {
           type: "number",
-          description: "Lock duration in minutes. Default: 5",
+          description: "Lock duration in minutes. Default: 10",
         },
       },
       required: ["path", "cell_ids"],

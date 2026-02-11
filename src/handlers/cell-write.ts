@@ -724,7 +724,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "copy_cells": async (args) => {
-    const { source_path, dest_path, start_index, end_index, cell_ids: copyCellIds, dest_index, dest_cell_id } = args as {
+    const { source_path, dest_path, start_index, end_index, cell_ids: copyCellIds, dest_index, dest_cell_id, client_name } = args as {
       source_path: string;
       dest_path: string;
       start_index?: number;
@@ -732,7 +732,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cell_ids?: string[];
       dest_index?: number;
       dest_cell_id?: string;
+      client_name?: string;
     };
+    const clientId = client_name || "claude-code";
 
     if (!isJupyterConnected()) {
       const resolvedSrc = resolveNotebookPath(source_path);
@@ -779,6 +781,21 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       destNb.cells.splice(insertAt, 0, ...copiedCells);
       await writeNotebook(resolvedDest, destNb);
+
+      // Track each copied cell in change history
+      for (let i = 0; i < copiedCells.length; i++) {
+        const cell = copiedCells[i];
+        const cellSource = typeof cell.source === "string" ? cell.source : "";
+        recordChange(dest_path, {
+          operation: "copy",
+          cellId: cell.id || "",
+          cellIdShort: (cell.id || "").slice(0, 8),
+          cellIndex: insertAt + i,
+          newSource: cellSource,
+          client: clientId,
+          detail: `copied from ${source_path}`,
+        });
+      }
 
       const cellSummaries = copiedCells.map((cell, i) => {
         const newId = (cell.id || "").slice(0, 8);
@@ -843,6 +860,22 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     destCells.insert(insertAt, copiedCells);
 
+    // Track each copied cell in change history
+    for (let i = 0; i < copiedCells.length; i++) {
+      const cell = copiedCells[i];
+      const cellId = cell.get("id") || "";
+      const source = cell.get("source")?.toString() || "";
+      recordChange(dest_path, {
+        operation: "copy",
+        cellId,
+        cellIdShort: cellId.slice(0, 8),
+        cellIndex: insertAt + i,
+        newSource: source,
+        client: clientId,
+        detail: `copied from ${source_path}`,
+      });
+    }
+
     const cellSummaries: string[] = [];
     for (let i = 0; i < copiedCells.length; i++) {
       const cell = copiedCells[i];
@@ -865,7 +898,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "move_cells": async (args) => {
-    const { source_path, dest_path, start_index, end_index, cell_ids: moveCellIds, dest_index, dest_cell_id } = args as {
+    const { source_path, dest_path, start_index, end_index, cell_ids: moveCellIds, dest_index, dest_cell_id, client_name } = args as {
       source_path: string;
       dest_path: string;
       start_index?: number;
@@ -873,7 +906,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cell_ids?: string[];
       dest_index?: number;
       dest_cell_id?: string;
+      client_name?: string;
     };
+    const clientId = client_name || "claude-code";
 
     if (!isJupyterConnected()) {
       const resolvedSrc = resolveNotebookPath(source_path);
@@ -939,6 +974,33 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       await writeNotebook(resolvedSrc, srcNb);
       if (!sameNotebook) await writeNotebook(resolvedDest, destNb);
+
+      // Track move operations in change history
+      for (let i = 0; i < cellsToMove.length; i++) {
+        const cell = cellsToMove[i];
+        const cellSource = typeof cell.source === "string" ? cell.source : "";
+        const cellId = cell.id || "";
+        // Record delete from source
+        recordChange(source_path, {
+          operation: "move",
+          cellId,
+          cellIdShort: cellId.slice(0, 8),
+          cellIndex: sourceIndices[i],
+          oldSource: cellSource,
+          client: clientId,
+          detail: `moved to ${dest_path} index ${adjustedDest + i}`,
+        });
+        // Record insert at destination
+        recordChange(dest_path, {
+          operation: "move",
+          cellId,
+          cellIdShort: cellId.slice(0, 8),
+          cellIndex: adjustedDest + i,
+          newSource: cellSource,
+          client: clientId,
+          detail: `moved from ${source_path}`,
+        });
+      }
 
       const cellSummaries = cellsToMove.map((cell, i) => {
         const preview = getCodePreview(typeof cell.source === "string" ? cell.source : "", 50);
@@ -1015,6 +1077,22 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       sourceCells.insert(adjustedDest, cellsToMove);
 
+      // Track move within same notebook
+      for (let i = 0; i < cellsToMove.length; i++) {
+        const cell = cellsToMove[i];
+        const cellId = cell.get("id") || "";
+        const source = cell.get("source")?.toString() || "";
+        recordChange(source_path, {
+          operation: "move",
+          cellId,
+          cellIdShort: cellId.slice(0, 8),
+          cellIndex: adjustedDest + i,
+          newSource: source,
+          client: clientId,
+          detail: `moved from index ${sourceIndices[i]} to ${adjustedDest + i}`,
+        });
+      }
+
       const cellSummaries: string[] = [];
       for (let i = 0; i < cellsToMove.length; i++) {
         const cell = cellsToMove[i];
@@ -1049,6 +1127,31 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       // Delete from source (reverse order)
       for (let i = sourceIndices.length - 1; i >= 0; i--) {
         sourceCells.delete(sourceIndices[i], 1);
+      }
+
+      // Track cross-notebook move
+      for (let i = 0; i < cellsToMove.length; i++) {
+        const cell = cellsToMove[i];
+        const cellId = cell.get("id") || "";
+        const source = cell.get("source")?.toString() || "";
+        recordChange(source_path, {
+          operation: "move",
+          cellId,
+          cellIdShort: cellId.slice(0, 8),
+          cellIndex: sourceIndices[i],
+          oldSource: source,
+          client: clientId,
+          detail: `moved to ${dest_path} index ${resolvedDest_idx + i}`,
+        });
+        recordChange(dest_path, {
+          operation: "move",
+          cellId,
+          cellIdShort: cellId.slice(0, 8),
+          cellIndex: resolvedDest_idx + i,
+          newSource: source,
+          client: clientId,
+          detail: `moved from ${source_path}`,
+        });
       }
 
       const cellSummaries: string[] = [];

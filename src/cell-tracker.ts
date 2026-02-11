@@ -21,6 +21,7 @@ export type ChangeOperation =
   | "update"
   | "delete"
   | "move"
+  | "copy"
   | "execute"
   | "change_type"
   | "clear_outputs"
