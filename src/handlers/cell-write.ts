@@ -139,7 +139,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cellIndex: insertIndex,
       newSource: source,
       client: clientId,
-    });
+    }, doc);
 
     // Show what was inserted
     const newId = newCellId.slice(0, 8);
@@ -240,7 +240,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     let lockOverrideDetail: string | undefined;
     const fullCellId = getCellId(cell) || "";
     if (fullCellId) {
-      const lock = checkLock(path, fullCellId, clientId);
+      const lock = checkLock(path, fullCellId, clientId, doc);
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
@@ -273,7 +273,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       newSource: source,
       client: clientId,
       detail: lockOverrideDetail,
-    });
+    }, doc);
 
     const diff = generateUnifiedDiff(
       oldSource,
@@ -402,7 +402,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         oldSource: rec.oldSource,
         newSource: rec.newSource,
         client: clientId,
-      });
+      }, doc);
     }
 
     return {
@@ -533,7 +533,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         cellIndex: insertIndex,
         newSource: ins.source,
         client: clientId,
-      });
+      }, doc);
 
       const insertDiff = [
         `--- /dev/null`,
@@ -643,7 +643,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     let lockOverrideDetail: string | undefined;
     const fullCellId = getCellId(cell) || "";
     if (fullCellId) {
-      const lock = checkLock(path, fullCellId, clientId);
+      const lock = checkLock(path, fullCellId, clientId, doc);
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
@@ -665,7 +665,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       oldSource,
       client: clientId,
       detail: lockOverrideDetail,
-    });
+    }, doc);
 
     cells.delete(resolvedIndex, 1);
 
@@ -1049,7 +1049,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         newSource: source,
         client: clientId,
         detail: `copied from ${source_path}`,
-      });
+      }, destDoc);
     }
 
     const cellSummaries: string[] = [];
@@ -1266,7 +1266,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           newSource: source,
           client: clientId,
           detail: `moved from index ${sourceIndices[i]} to ${adjustedDest + i}`,
-        });
+        }, sourceDoc);
       }
 
       const cellSummaries: string[] = [];
@@ -1318,7 +1318,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           oldSource: source,
           client: clientId,
           detail: `moved to ${dest_path} index ${resolvedDest_idx + i}`,
-        });
+        }, sourceDoc);
         recordChange(dest_path, {
           operation: "move",
           cellId,
@@ -1327,7 +1327,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           newSource: source,
           client: clientId,
           detail: `moved from ${source_path}`,
-        });
+        }, destDoc);
       }
 
       const cellSummaries: string[] = [];

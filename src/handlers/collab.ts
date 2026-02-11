@@ -46,7 +46,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       limit?: number;
     };
 
-    const history = getCellHistory(path, cell_id, limit);
+    const { doc } = await getNotebookCells(path);
+    const history = getCellHistory(path, cell_id, limit, doc);
     if (history.length === 0) {
       return {
         content: [{
@@ -84,7 +85,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       limit?: number;
     };
 
-    const { changes, currentVersion } = getChangesSince(path, since_version, limit);
+    const { doc } = await getNotebookCells(path);
+    const { changes, currentVersion } = getChangesSince(path, since_version, limit, doc);
 
     if (changes.length === 0) {
       return {
@@ -120,7 +122,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
     const clientId = client_name || "claude-code";
 
-    const deleted = getDeletedCellSource(path, cell_id);
+    const { doc: notebookDoc } = await getNotebookCells(path);
+    const deleted = getDeletedCellSource(path, cell_id, notebookDoc);
     if (!deleted) {
       return {
         content: [{
@@ -195,7 +198,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       newSource: deleted.source,
       detail: `recovered from deleted cell ${cell_id}`,
       client: clientId,
-    });
+    }, doc);
 
     return {
       content: [{
@@ -212,8 +215,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       description?: string;
     };
 
-    const { cells } = await getNotebookCells(path);
-    const snapshot = createSnapshot(path, snapName, cells, snapDesc);
+    const { cells, doc } = await getNotebookCells(path);
+    const snapshot = createSnapshot(path, snapName, cells, snapDesc, doc);
 
     return {
       content: [{
@@ -229,14 +232,15 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       name: string;
     };
 
-    const snapshot = getSnapshot(path, snapName);
+    const { cells, mode, notebook, doc } = await getNotebookCells(path);
+
+    const snapshot = getSnapshot(path, snapName, doc);
     if (!snapshot) {
       throw new Error(`No snapshot named '${snapName}' found for ${path}. Use list_snapshots to see available snapshots.`);
     }
 
     // Auto-save a pre-restore snapshot for safety
-    const { cells, mode, notebook, doc } = await getNotebookCells(path);
-    createSnapshot(path, `pre-restore-${Date.now()}`, cells, `Auto-saved before restoring '${snapName}'`);
+    createSnapshot(path, `pre-restore-${Date.now()}`, cells, `Auto-saved before restoring '${snapName}'`, doc);
 
     if (mode === "jupyter" && doc) {
       const yCells = doc.getArray("cells");
@@ -249,7 +253,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         cellIndex: -1,
         detail: `restored snapshot '${snapName}' (${restored} cells)`,
         client: "claude-code",
-      });
+      }, doc);
 
       return {
         content: [{
@@ -277,7 +281,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   "list_snapshots": async (args) => {
     const { path } = args as { path: string };
 
-    const snaps = listSnapshotsForPath(path);
+    const { doc } = await getNotebookCells(path);
+    const snaps = listSnapshotsForPath(path, doc);
     if (snaps.length === 0) {
       return {
         content: [{
@@ -308,12 +313,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       name: string;
     };
 
-    const snapshot = getSnapshot(path, snapName);
+    const { cells, doc } = await getNotebookCells(path);
+
+    const snapshot = getSnapshot(path, snapName, doc);
     if (!snapshot) {
       throw new Error(`No snapshot named '${snapName}' found for ${path}.`);
     }
 
-    const { cells } = await getNotebookCells(path);
     const result = diffSnapshot(snapshot, cells);
 
     const summary = `Diff: snapshot '${snapName}' vs current ${path}:\n` +
@@ -362,7 +368,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
 
     // Resolve cell_id prefixes to full IDs
-    const { cells } = await getNotebookCells(path);
+    const { cells, doc } = await getNotebookCells(path);
     const fullIds: string[] = [];
     for (const prefix of lockCellIds) {
       const idx = resolveCellId(cells, prefix);
@@ -372,7 +378,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const ttlMs = ttl_minutes * 60 * 1000;
-    const result = acquireLocks(path, fullIds, owner, ttlMs);
+    const result = acquireLocks(path, fullIds, owner, ttlMs, doc);
 
     const lines: string[] = [];
     if (result.acquired.length > 0) {
@@ -403,7 +409,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
 
     // Resolve cell_id prefixes to full IDs
-    const { cells } = await getNotebookCells(path);
+    const { cells, doc } = await getNotebookCells(path);
     const fullIds: string[] = [];
     for (const prefix of unlockCellIds) {
       try {
@@ -417,7 +423,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       }
     }
 
-    const result = releaseLocks(path, fullIds, owner, force);
+    const result = releaseLocks(path, fullIds, owner, force, doc);
 
     const lines: string[] = [];
     if (result.released.length > 0) {
@@ -441,7 +447,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   "list_locks": async (args) => {
     const { path } = args as { path: string };
 
-    const activeLocks = listLocksForPath(path);
+    const { doc } = await getNotebookCells(path);
+    const activeLocks = listLocksForPath(path, doc);
 
     if (activeLocks.length === 0) {
       return {

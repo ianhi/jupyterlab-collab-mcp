@@ -170,7 +170,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cellIndex: insertIndex,
       newSource: source,
       client: clientId,
-    });
+    }, doc);
 
     // Execute the cell
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
@@ -237,7 +237,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     let lockOverrideDetail: string | undefined;
     const fullCellId = getCellId(cell) || "";
     if (fullCellId) {
-      const lock = checkLock(path, fullCellId, clientId);
+      const lock = checkLock(path, fullCellId, clientId, doc);
       if (lock) {
         if (!force) {
           const cellIdStr = truncatedCellId(cell);
@@ -268,7 +268,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       newSource: source,
       client: clientId,
       detail: lockOverrideDetail,
-    });
+    }, doc);
 
     // Execute the cell
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);

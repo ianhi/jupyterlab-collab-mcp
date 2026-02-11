@@ -2,7 +2,10 @@
  * Notebook snapshots — save and restore named checkpoints.
  *
  * Snapshots capture the full cell content of a notebook at a point in time.
- * They're stored in-memory (keyed by notebook path + snapshot name).
+ *
+ * Dual-mode:
+ * - When `doc` is provided → shared via Yjs (visible across MCP instances)
+ * - When `doc` is omitted  → in-memory (single-instance, existing behavior)
  *
  * Use cases:
  * - Save state before risky operations
@@ -38,7 +41,14 @@ export interface NotebookSnapshot {
 }
 
 // ============================================================================
-// Global state — snapshots keyed by "path:name"
+// Constants
+// ============================================================================
+
+const YJS_MAP_KEY = "mcp_snapshots";
+const YJS_MAX_SNAPSHOTS = 20;
+
+// ============================================================================
+// In-memory backend — snapshots keyed by "path:name"
 // ============================================================================
 
 const snapshots = new Map<string, NotebookSnapshot>();
@@ -48,20 +58,11 @@ function snapshotKey(path: string, name: string): string {
 }
 
 // ============================================================================
-// Core API
+// Shared helper — extract cell snapshots from Y.Array or plain array
 // ============================================================================
 
-/**
- * Capture the current state of a notebook's cells as a snapshot.
- * Works with both Y.Array cells (Jupyter mode) and plain objects (filesystem mode).
- */
-export function createSnapshot(
-  path: string,
-  name: string,
-  cells: Y.Array<any> | any[],
-  description?: string
-): NotebookSnapshot {
-  const cellSnapshots: CellSnapshot[] = [];
+function extractCellSnapshots(cells: Y.Array<any> | any[]): CellSnapshot[] {
+  const result: CellSnapshot[] = [];
   const length = cells instanceof Y.Array ? cells.length : cells.length;
 
   for (let i = 0; i < length; i++) {
@@ -81,8 +82,44 @@ export function createSnapshot(
       metadata = { ...cell.metadata };
     }
 
-    cellSnapshots.push({ id, cell_type: cellType, source, metadata });
+    result.push({ id, cell_type: cellType, source, metadata });
   }
+
+  return result;
+}
+
+// ============================================================================
+// Yjs helpers
+// ============================================================================
+
+function getYjsSnapshotMap(doc: Y.Doc): Y.Map<string> {
+  return doc.getMap<string>(YJS_MAP_KEY);
+}
+
+function parseSnapshot(json: string): NotebookSnapshot | null {
+  try {
+    return JSON.parse(json) as NotebookSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// Core API — dual-mode dispatch
+// ============================================================================
+
+/**
+ * Capture the current state of a notebook's cells as a snapshot.
+ * Works with both Y.Array cells (Jupyter mode) and plain objects (filesystem mode).
+ */
+export function createSnapshot(
+  path: string,
+  name: string,
+  cells: Y.Array<any> | any[],
+  description?: string,
+  doc?: Y.Doc
+): NotebookSnapshot {
+  const cellSnapshots = extractCellSnapshots(cells);
 
   const snapshot: NotebookSnapshot = {
     name,
@@ -92,7 +129,12 @@ export function createSnapshot(
     description,
   };
 
-  snapshots.set(snapshotKey(path, name), snapshot);
+  if (doc) {
+    createSnapshotYjs(doc, name, snapshot);
+  } else {
+    snapshots.set(snapshotKey(path, name), snapshot);
+  }
+
   return snapshot;
 }
 
@@ -101,30 +143,26 @@ export function createSnapshot(
  */
 export function getSnapshot(
   path: string,
-  name: string
+  name: string,
+  doc?: Y.Doc
 ): NotebookSnapshot | undefined {
+  if (doc) return getSnapshotYjs(doc, name);
   return snapshots.get(snapshotKey(path, name));
 }
 
 /**
  * List all snapshots for a notebook.
  */
-export function listSnapshots(path: string): NotebookSnapshot[] {
-  const results: NotebookSnapshot[] = [];
-  for (const [key, snap] of snapshots) {
-    if (snap.path === path) {
-      results.push(snap);
-    }
-  }
-  return results.sort(
-    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-  );
+export function listSnapshots(path: string, doc?: Y.Doc): NotebookSnapshot[] {
+  if (doc) return listSnapshotsYjs(doc);
+  return listSnapshotsInMemory(path);
 }
 
 /**
  * Delete a snapshot.
  */
-export function deleteSnapshot(path: string, name: string): boolean {
+export function deleteSnapshot(path: string, name: string, doc?: Y.Doc): boolean {
+  if (doc) return deleteSnapshotYjs(doc, name);
   return snapshots.delete(snapshotKey(path, name));
 }
 
@@ -255,4 +293,76 @@ export function diffSnapshot(
   }
 
   return { added, deleted, modified, unchanged, details };
+}
+
+// ============================================================================
+// In-memory implementations
+// ============================================================================
+
+function listSnapshotsInMemory(path: string): NotebookSnapshot[] {
+  const results: NotebookSnapshot[] = [];
+  for (const [key, snap] of snapshots) {
+    if (snap.path === path) {
+      results.push(snap);
+    }
+  }
+  return results.sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+}
+
+// ============================================================================
+// Yjs implementations
+// ============================================================================
+
+function createSnapshotYjs(doc: Y.Doc, name: string, snapshot: NotebookSnapshot): void {
+  const snapMap = getYjsSnapshotMap(doc);
+
+  doc.transact(() => {
+    snapMap.set(name, JSON.stringify(snapshot));
+
+    // Enforce cap of YJS_MAX_SNAPSHOTS
+    if (snapMap.size > YJS_MAX_SNAPSHOTS) {
+      // Find oldest snapshots to remove
+      const all: { name: string; createdAt: string }[] = [];
+      for (const [key, json] of snapMap.entries()) {
+        const s = parseSnapshot(json);
+        if (s) all.push({ name: key, createdAt: s.createdAt });
+      }
+      all.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      const toRemove = all.length - YJS_MAX_SNAPSHOTS;
+      for (let i = 0; i < toRemove; i++) {
+        snapMap.delete(all[i].name);
+      }
+    }
+  });
+}
+
+function getSnapshotYjs(doc: Y.Doc, name: string): NotebookSnapshot | undefined {
+  const snapMap = getYjsSnapshotMap(doc);
+  const json = snapMap.get(name);
+  if (!json) return undefined;
+  return parseSnapshot(json) || undefined;
+}
+
+function listSnapshotsYjs(doc: Y.Doc): NotebookSnapshot[] {
+  const snapMap = getYjsSnapshotMap(doc);
+  const results: NotebookSnapshot[] = [];
+
+  for (const [, json] of snapMap.entries()) {
+    const snap = parseSnapshot(json);
+    if (snap) results.push(snap);
+  }
+
+  return results.sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+}
+
+function deleteSnapshotYjs(doc: Y.Doc, name: string): boolean {
+  const snapMap = getYjsSnapshotMap(doc);
+  if (!snapMap.has(name)) return false;
+  snapMap.delete(name);
+  return true;
 }

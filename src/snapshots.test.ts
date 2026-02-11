@@ -461,3 +461,174 @@ describe("diffSnapshot", () => {
     expect(diff.added).toBe(0);
   });
 });
+
+// ============================================================================
+// Yjs backend tests
+// ============================================================================
+
+function createSyncedDocs(): [Y.Doc, Y.Doc] {
+  const doc1 = new Y.Doc();
+  const doc2 = new Y.Doc();
+  doc1.on("update", (update: Uint8Array) => Y.applyUpdate(doc2, update));
+  doc2.on("update", (update: Uint8Array) => Y.applyUpdate(doc1, update));
+  Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
+  return [doc1, doc2];
+}
+
+describe("Yjs backend — createSnapshot", () => {
+  it("stores snapshot in Yjs doc", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([
+      { id: "c1", cell_type: "code", source: "x = 1" },
+    ]);
+
+    const snap = createSnapshot(PATH, "v1", cells, "test desc", doc);
+    expect(snap.name).toBe("v1");
+    expect(snap.description).toBe("test desc");
+    expect(snap.cells).toHaveLength(1);
+  });
+
+  it("overwrites existing snapshot with same name", () => {
+    const doc = new Y.Doc();
+    const cells1 = createPlainCells([{ id: "c1", cell_type: "code", source: "v1" }]);
+    const cells2 = createPlainCells([{ id: "c1", cell_type: "code", source: "v2" }]);
+
+    createSnapshot(PATH, "test", cells1, undefined, doc);
+    createSnapshot(PATH, "test", cells2, undefined, doc);
+
+    const snap = getSnapshot(PATH, "test", doc);
+    expect(snap!.cells[0].source).toBe("v2");
+  });
+
+  it("enforces cap of 20 snapshots", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+
+    // Create 25 snapshots
+    for (let i = 0; i < 25; i++) {
+      createSnapshot(PATH, `snap-${i}`, cells, undefined, doc);
+    }
+
+    const list = listSnapshots(PATH, doc);
+    expect(list.length).toBeLessThanOrEqual(20);
+    // Oldest should have been pruned — snap-0 through snap-4
+    const names = list.map((s) => s.name);
+    expect(names).not.toContain("snap-0");
+    expect(names).toContain("snap-24");
+  });
+});
+
+describe("Yjs backend — getSnapshot", () => {
+  it("returns snapshot by name from Yjs", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+    createSnapshot(PATH, "my-snap", cells, undefined, doc);
+
+    const snap = getSnapshot(PATH, "my-snap", doc);
+    expect(snap).toBeDefined();
+    expect(snap!.name).toBe("my-snap");
+    expect(snap!.cells[0].source).toBe("x");
+  });
+
+  it("returns undefined for non-existent snapshot", () => {
+    const doc = new Y.Doc();
+    expect(getSnapshot(PATH, "nope", doc)).toBeUndefined();
+  });
+
+  it("JSON round-trip preserves all fields", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([
+      { id: "c1", cell_type: "code", source: "x = 1", metadata: { tags: ["important"], trusted: true } },
+      { id: "c2", cell_type: "markdown", source: "# Header", metadata: {} },
+    ]);
+    createSnapshot(PATH, "full", cells, "detailed description", doc);
+
+    const snap = getSnapshot(PATH, "full", doc);
+    expect(snap!.name).toBe("full");
+    expect(snap!.path).toBe(PATH);
+    expect(snap!.description).toBe("detailed description");
+    expect(snap!.createdAt).toBeTruthy();
+    expect(snap!.cells).toHaveLength(2);
+    expect(snap!.cells[0].id).toBe("c1");
+    expect(snap!.cells[0].cell_type).toBe("code");
+    expect(snap!.cells[0].source).toBe("x = 1");
+    expect(snap!.cells[0].metadata).toEqual({ tags: ["important"], trusted: true });
+    expect(snap!.cells[1].id).toBe("c2");
+    expect(snap!.cells[1].cell_type).toBe("markdown");
+    expect(snap!.cells[1].source).toBe("# Header");
+  });
+});
+
+describe("Yjs backend — listSnapshots", () => {
+  it("returns empty when no snapshots", () => {
+    const doc = new Y.Doc();
+    expect(listSnapshots(PATH, doc)).toEqual([]);
+  });
+
+  it("returns all snapshots sorted by creation time", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+    createSnapshot(PATH, "b", cells, undefined, doc);
+    createSnapshot(PATH, "a", cells, undefined, doc);
+
+    const list = listSnapshots(PATH, doc);
+    expect(list).toHaveLength(2);
+    const names = list.map((s) => s.name);
+    expect(names).toContain("a");
+    expect(names).toContain("b");
+  });
+});
+
+describe("Yjs backend — deleteSnapshot", () => {
+  it("deletes an existing snapshot", () => {
+    const doc = new Y.Doc();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+    createSnapshot(PATH, "doomed", cells, undefined, doc);
+
+    expect(deleteSnapshot(PATH, "doomed", doc)).toBe(true);
+    expect(getSnapshot(PATH, "doomed", doc)).toBeUndefined();
+  });
+
+  it("returns false for non-existent snapshot", () => {
+    const doc = new Y.Doc();
+    expect(deleteSnapshot(PATH, "nope", doc)).toBe(false);
+  });
+});
+
+describe("Yjs backend — cross-instance sync", () => {
+  it("snapshot on doc1 is retrievable on doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    const cells = createPlainCells([
+      { id: "c1", cell_type: "code", source: "shared data" },
+    ]);
+
+    createSnapshot(PATH, "shared", cells, "cross-instance", doc1);
+
+    const snap = getSnapshot(PATH, "shared", doc2);
+    expect(snap).toBeDefined();
+    expect(snap!.cells[0].source).toBe("shared data");
+    expect(snap!.description).toBe("cross-instance");
+  });
+
+  it("list on doc2 shows snapshots from doc1", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+
+    createSnapshot(PATH, "snap-1", cells, undefined, doc1);
+    createSnapshot(PATH, "snap-2", cells, undefined, doc1);
+
+    const list = listSnapshots(PATH, doc2);
+    expect(list).toHaveLength(2);
+  });
+
+  it("delete on doc1 removes from doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    const cells = createPlainCells([{ id: "c1", cell_type: "code", source: "x" }]);
+
+    createSnapshot(PATH, "temp", cells, undefined, doc1);
+    expect(getSnapshot(PATH, "temp", doc2)).toBeDefined();
+
+    deleteSnapshot(PATH, "temp", doc1);
+    expect(getSnapshot(PATH, "temp", doc2)).toBeUndefined();
+  });
+});

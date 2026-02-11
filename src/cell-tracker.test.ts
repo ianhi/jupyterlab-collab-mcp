@@ -466,3 +466,191 @@ describe("getDeletedCellSource", () => {
     expect(result!.source).toBe("found via short id");
   });
 });
+
+// ============================================================================
+// Yjs backend tests
+// ============================================================================
+
+import * as Y from "yjs";
+
+function createSyncedDocs(): [Y.Doc, Y.Doc] {
+  const doc1 = new Y.Doc();
+  const doc2 = new Y.Doc();
+  doc1.on("update", (update: Uint8Array) => Y.applyUpdate(doc2, update));
+  doc2.on("update", (update: Uint8Array) => Y.applyUpdate(doc1, update));
+  Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
+  return [doc1, doc2];
+}
+
+function makeChange(overrides: Partial<Omit<import("./cell-tracker.js").CellChange, "version" | "timestamp">> = {}) {
+  return {
+    operation: "update" as const,
+    cellId: "cell-1-full-uuid",
+    cellIdShort: "cell-1-f",
+    cellIndex: 0,
+    oldSource: "old",
+    newSource: "new",
+    client: "test-agent",
+    ...overrides,
+  };
+}
+
+describe("Yjs backend — recordChange", () => {
+  it("records a change and increments version", () => {
+    const doc = new Y.Doc();
+    const v1 = recordChange(PATH, makeChange(), doc);
+    expect(v1).toBe(1);
+    const v2 = recordChange(PATH, makeChange({ cellIndex: 1 }), doc);
+    expect(v2).toBe(2);
+  });
+
+  it("stores changes retrievable via getChangesSince", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange(), doc);
+    recordChange(PATH, makeChange({ operation: "insert" }), doc);
+    const { changes, currentVersion } = getChangesSince(PATH, 0, 50, doc);
+    expect(currentVersion).toBe(2);
+    expect(changes).toHaveLength(2);
+    expect(changes[0].operation).toBe("update");
+    expect(changes[1].operation).toBe("insert");
+  });
+});
+
+describe("Yjs backend — getCellHistory", () => {
+  it("filters by cell ID prefix", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange({ cellId: "aaa-111", cellIdShort: "aaa-111" }), doc);
+    recordChange(PATH, makeChange({ cellId: "bbb-222", cellIdShort: "bbb-222" }), doc);
+    recordChange(PATH, makeChange({ cellId: "aaa-111", cellIdShort: "aaa-111", operation: "delete" }), doc);
+
+    const history = getCellHistory(PATH, "aaa", 20, doc);
+    expect(history).toHaveLength(2);
+    expect(history[0].operation).toBe("update");
+    expect(history[1].operation).toBe("delete");
+  });
+
+  it("respects limit", () => {
+    const doc = new Y.Doc();
+    for (let i = 0; i < 10; i++) {
+      recordChange(PATH, makeChange(), doc);
+    }
+    const history = getCellHistory(PATH, "cell-1", 3, doc);
+    expect(history).toHaveLength(3);
+  });
+});
+
+describe("Yjs backend — getChangesSince", () => {
+  it("filters by version", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange(), doc); // v1
+    recordChange(PATH, makeChange(), doc); // v2
+    recordChange(PATH, makeChange(), doc); // v3
+
+    const { changes } = getChangesSince(PATH, 1, 50, doc);
+    expect(changes).toHaveLength(2);
+    expect(changes[0].version).toBe(2);
+    expect(changes[1].version).toBe(3);
+  });
+});
+
+describe("Yjs backend — getCurrentVersion", () => {
+  it("returns 0 for fresh doc", () => {
+    const doc = new Y.Doc();
+    expect(getCurrentVersion(PATH, doc)).toBe(0);
+  });
+
+  it("returns latest version", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange(), doc);
+    recordChange(PATH, makeChange(), doc);
+    expect(getCurrentVersion(PATH, doc)).toBe(2);
+  });
+});
+
+describe("Yjs backend — clearTracker", () => {
+  it("clears all tracking data", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange(), doc);
+    clearTracker(PATH, doc);
+    expect(getCurrentVersion(PATH, doc)).toBe(0);
+    const { changes } = getChangesSince(PATH, 0, 50, doc);
+    expect(changes).toHaveLength(0);
+  });
+});
+
+describe("Yjs backend — getChangeSummary", () => {
+  it("returns recent changes and cell count", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange({ cellId: "a" }), doc);
+    recordChange(PATH, makeChange({ cellId: "b" }), doc);
+    recordChange(PATH, makeChange({ cellId: "a" }), doc);
+
+    const summary = getChangeSummary(PATH, 20, doc);
+    expect(summary.currentVersion).toBe(3);
+    expect(summary.recentChanges).toHaveLength(3);
+    expect(summary.cellsModified).toBe(2);
+  });
+});
+
+describe("Yjs backend — getDeletedCellSource", () => {
+  it("finds deleted cell source", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange({ operation: "delete", cellId: "del-cell", cellIdShort: "del-cell", oldSource: "deleted code", newSource: undefined }), doc);
+    const result = getDeletedCellSource(PATH, "del", doc);
+    expect(result).toBeDefined();
+    expect(result!.source).toBe("deleted code");
+  });
+
+  it("returns undefined when no delete found", () => {
+    const doc = new Y.Doc();
+    recordChange(PATH, makeChange(), doc);
+    expect(getDeletedCellSource(PATH, "nonexistent", doc)).toBeUndefined();
+  });
+});
+
+describe("Yjs backend — cross-instance sync", () => {
+  it("change on doc1 visible on doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    recordChange(PATH, makeChange(), doc1);
+    const { changes, currentVersion } = getChangesSince(PATH, 0, 50, doc2);
+    expect(currentVersion).toBe(1);
+    expect(changes).toHaveLength(1);
+    expect(changes[0].client).toBe("test-agent");
+  });
+
+  it("changes from both docs merge", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    recordChange(PATH, makeChange({ client: "agent-1" }), doc1);
+    recordChange(PATH, makeChange({ client: "agent-2" }), doc2);
+
+    const { changes: c1 } = getChangesSince(PATH, 0, 50, doc1);
+    const { changes: c2 } = getChangesSince(PATH, 0, 50, doc2);
+    // Both docs should see both changes
+    expect(c1.length).toBeGreaterThanOrEqual(2);
+    expect(c2.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("deleted cell source recoverable cross-instance", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    recordChange(PATH, makeChange({ operation: "delete", cellId: "del-x", cellIdShort: "del-x", oldSource: "recover me" }), doc1);
+    const result = getDeletedCellSource(PATH, "del-x", doc2);
+    expect(result).toBeDefined();
+    expect(result!.source).toBe("recover me");
+  });
+});
+
+describe("Yjs backend — pruning", () => {
+  it("prunes when over 2x limit", () => {
+    const doc = new Y.Doc();
+    // YJS_MAX_ENTRIES = 1000, prune threshold = 2000
+    for (let i = 0; i < 2005; i++) {
+      recordChange(PATH, makeChange({ cellIndex: i }), doc);
+    }
+    const { changes } = getChangesSince(PATH, 0, 5000, doc);
+    // After pruning, should have ~1000 entries
+    expect(changes.length).toBeLessThanOrEqual(1005);
+    expect(changes.length).toBeGreaterThan(0);
+    // Latest version should still be correct
+    expect(getCurrentVersion(PATH, doc)).toBe(2005);
+  });
+});

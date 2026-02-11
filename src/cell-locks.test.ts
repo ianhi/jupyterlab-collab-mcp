@@ -242,3 +242,162 @@ describe("clearLocks", () => {
     expect(clearLocks(PATH)).toBe(0);
   });
 });
+
+// ============================================================================
+// Yjs backend tests
+// ============================================================================
+
+import * as Y from "yjs";
+
+function createSyncedDocs(): [Y.Doc, Y.Doc] {
+  const doc1 = new Y.Doc();
+  const doc2 = new Y.Doc();
+  doc1.on("update", (update: Uint8Array) => Y.applyUpdate(doc2, update));
+  doc2.on("update", (update: Uint8Array) => Y.applyUpdate(doc1, update));
+  Y.applyUpdate(doc2, Y.encodeStateAsUpdate(doc1));
+  return [doc1, doc2];
+}
+
+describe("Yjs backend — acquireLocks", () => {
+  it("acquires locks via Yjs map", () => {
+    const doc = new Y.Doc();
+    const result = acquireLocks(PATH, ["cell-1", "cell-2"], "agent-a", undefined, doc);
+    expect(result.acquired).toHaveLength(2);
+    expect(result.blocked).toHaveLength(0);
+  });
+
+  it("blocks when another owner holds the lock", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const result = acquireLocks(PATH, ["cell-1"], "agent-b", undefined, doc);
+    expect(result.acquired).toHaveLength(0);
+    expect(result.blocked).toHaveLength(1);
+    expect(result.blocked[0].owner).toBe("agent-a");
+  });
+
+  it("allows same owner to re-acquire (renew)", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const result = acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    expect(result.acquired).toHaveLength(1);
+    expect(result.blocked).toHaveLength(0);
+  });
+
+  it("allows acquire after TTL expires", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", 1, doc); // 1ms TTL
+    // Wait a tiny bit for expiry
+    const start = Date.now();
+    while (Date.now() - start < 5) { /* spin */ }
+    const result = acquireLocks(PATH, ["cell-1"], "agent-b", undefined, doc);
+    expect(result.acquired).toHaveLength(1);
+  });
+});
+
+describe("Yjs backend — releaseLocks", () => {
+  it("releases owned locks", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const result = releaseLocks(PATH, ["cell-1"], "agent-a", false, doc);
+    expect(result.released).toHaveLength(1);
+    expect(result.notOwned).toHaveLength(0);
+  });
+
+  it("refuses to release locks owned by someone else", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const result = releaseLocks(PATH, ["cell-1"], "agent-b", false, doc);
+    expect(result.released).toHaveLength(0);
+    expect(result.notOwned).toHaveLength(1);
+  });
+
+  it("force releases locks owned by someone else", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const result = releaseLocks(PATH, ["cell-1"], "agent-b", true, doc);
+    expect(result.released).toHaveLength(1);
+  });
+});
+
+describe("Yjs backend — checkLock", () => {
+  it("returns undefined for free cells", () => {
+    const doc = new Y.Doc();
+    expect(checkLock(PATH, "cell-1", "agent-a", doc)).toBeUndefined();
+  });
+
+  it("returns lock when blocked by another owner", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    const lock = checkLock(PATH, "cell-1", "agent-b", doc);
+    expect(lock).toBeDefined();
+    expect(lock!.owner).toBe("agent-a");
+  });
+
+  it("returns undefined for same owner", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc);
+    expect(checkLock(PATH, "cell-1", "agent-a", doc)).toBeUndefined();
+  });
+
+  it("cleans up expired locks", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", 1, doc);
+    const start = Date.now();
+    while (Date.now() - start < 5) { /* spin */ }
+    expect(checkLock(PATH, "cell-1", "agent-b", doc)).toBeUndefined();
+  });
+});
+
+describe("Yjs backend — listLocks", () => {
+  it("lists active locks", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1", "cell-2"], "agent-a", undefined, doc);
+    const locks = listLocks(PATH, doc);
+    expect(locks).toHaveLength(2);
+  });
+
+  it("prunes expired locks", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1"], "agent-a", 1, doc);
+    const start = Date.now();
+    while (Date.now() - start < 5) { /* spin */ }
+    const locks = listLocks(PATH, doc);
+    expect(locks).toHaveLength(0);
+  });
+});
+
+describe("Yjs backend — clearLocks", () => {
+  it("clears all locks", () => {
+    const doc = new Y.Doc();
+    acquireLocks(PATH, ["cell-1", "cell-2"], "agent-a", undefined, doc);
+    const count = clearLocks(PATH, doc);
+    expect(count).toBe(2);
+    expect(listLocks(PATH, doc)).toHaveLength(0);
+  });
+});
+
+describe("Yjs backend — cross-instance sync", () => {
+  it("lock on doc1 visible on doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc1);
+    const locks = listLocks(PATH, doc2);
+    expect(locks).toHaveLength(1);
+    expect(locks[0].owner).toBe("agent-a");
+  });
+
+  it("lock on doc1 blocks acquire on doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc1);
+    const result = acquireLocks(PATH, ["cell-1"], "agent-b", undefined, doc2);
+    expect(result.blocked).toHaveLength(1);
+    expect(result.blocked[0].owner).toBe("agent-a");
+  });
+
+  it("release on doc1 frees on doc2", () => {
+    const [doc1, doc2] = createSyncedDocs();
+    acquireLocks(PATH, ["cell-1"], "agent-a", undefined, doc1);
+    releaseLocks(PATH, ["cell-1"], "agent-a", false, doc1);
+    const result = acquireLocks(PATH, ["cell-1"], "agent-b", undefined, doc2);
+    expect(result.acquired).toHaveLength(1);
+  });
+});

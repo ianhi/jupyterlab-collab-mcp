@@ -15,6 +15,10 @@ import type { NotebookOutput, ExecutionResult } from "./helpers.js";
 // State and config
 // ============================================================================
 
+// Unique instance ID — generated once at MCP server startup.
+// Used to distinguish multiple MCP server instances connected to the same notebook.
+export const instanceId = crypto.randomUUID();
+
 // Dynamic configuration - set via connect_jupyter tool
 export type JupyterConfig = {
   host: string;
@@ -160,6 +164,14 @@ export const connectedNotebooks = new Map<
   { doc: Y.Doc; provider: WebsocketProvider; kernelId?: string }
 >();
 
+/**
+ * Get the Y.Doc for a connected notebook path, if available.
+ * Useful for callers that need the doc without going through getNotebookCells.
+ */
+export function getDocForPath(path: string): Y.Doc | undefined {
+  return connectedNotebooks.get(path)?.doc;
+}
+
 // ============================================================================
 // Jupyter API helpers
 // ============================================================================
@@ -294,6 +306,7 @@ export async function connectToNotebook(
     display_name: "Claude Code",
     initials: "CC",
     color: "#ff6b6b",
+    instance_id: instanceId,
   });
 
   // Cache connection
