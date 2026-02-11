@@ -53,6 +53,22 @@ List notebooks with active kernel sessions. Requires JupyterLab connection.
 
 ---
 
+## list_kernels
+
+List available kernel types and running kernel instances. Requires JupyterLab connection.
+
+*No parameters.*
+
+Returns:
+- Available kernel specs (name, display name, language) with the default kernel type
+- Running kernel instances with their ID, state, and last activity
+
+**Notes:**
+- Use this to discover what kernels are available before calling `open_notebook` with a specific `kernel_name`
+- Running kernels show execution state (`idle`, `busy`, `starting`, `dead`)
+
+---
+
 ## open_notebook
 
 Open a notebook and start a kernel session. Requires JupyterLab connection.

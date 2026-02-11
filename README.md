@@ -11,7 +11,7 @@ Claude Code  ←—stdio—→  MCP Server  ←—y-websocket—→  JupyterLab
 Claude Code can already edit files, but notebooks are special — they have cells, kernels, outputs, and a live browser UI. This MCP server bridges the gap:
 
 - **Real-time sync** — edits appear instantly in JupyterLab via y-websocket
-- **52 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
+- **53 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
 - **Cell ID addressing** — stable references that survive insertions and deletions
 - **Multi-agent ready** — cell locking, change tracking, and per-agent attribution
 - **Context-efficient** — filter by cell type, skip outputs, limit images

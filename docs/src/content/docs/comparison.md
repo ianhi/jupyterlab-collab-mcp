@@ -59,7 +59,7 @@ get_user_focus(path) → { focusedCell: 3, cursorPosition: 42 }
 
 Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](/agents/multi-agent/).
 
-### 52 tools
+### 53 tools
 
 Comprehensive coverage: batch operations, cross-notebook copy/move, cell ID addressing, metadata/tags, diagnostics, symbol rename, and more.
 

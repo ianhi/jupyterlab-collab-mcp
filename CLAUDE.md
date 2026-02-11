@@ -14,9 +14,17 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 
 ```
 src/
-├── index.ts        # MCP server entry point + tool handlers
+├── index.ts        # Thin MCP server entry point (dispatches to handlers)
+├── handlers/       # All 53 tool handlers, organized by category
+│   ├── connection.ts   # connect_jupyter, list_files, list_notebooks, list_kernels, open/create/rename_notebook
+│   ├── cell-read.ts    # get_notebook_content, get_notebook_outline, search_notebook, replace_in_notebook
+│   ├── cell-write.ts   # insert_cell, update_cell, delete_cell(s), change_cell_type, copy/move_cells, batch ops
+│   ├── execute.ts      # execute_cell, execute_code, execute_range, insert/update_and_execute, clear_outputs, get_cell_outputs
+│   ├── metadata.ts     # get/set_cell_metadata, add/remove_cell_tags, find_cells_by_tag, notebook metadata
+│   ├── kernel-lsp.ts   # kernel status/variables/interrupt/restart, diagnostics, hover_info, rename_symbol, diff/rename_notebook
+│   └── collab.ts       # get_user_focus, cell history, notebook changes, recover_cell, snapshots, locks
 ├── connection.ts   # JupyterLab connection state, config, session management, kernel execution
-├── schemas.ts      # Tool schema definitions (all 44+ tools)
+├── schemas.ts      # Tool schema definitions (all 53 tools)
 ├── tool-helpers.ts # Shared handler patterns (getNotebookCells, resolveIndexParam, etc.)
 ├── helpers.ts      # Shared utilities (cell extraction, diffing, output formatting)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb without JupyterLab)
@@ -36,12 +44,16 @@ src/
 | `list_notebooks` | List open notebooks with active kernels |
 | `open_notebook` | Open a notebook and start its kernel |
 | `create_notebook` | Create a new notebook file |
+| `list_kernels` | List available kernel types and running instances |
 | `get_notebook_content` | Get cells with filtering (code only by default) |
 | `get_notebook_outline` | Get condensed structure (headers + first lines) |
 | `search_notebook` | Grep through source code and outputs |
+| `replace_in_notebook` | Search and replace across cells |
 | `insert_cell` | Insert a new cell at position |
 | `insert_and_execute` | Insert a cell and run it in one operation |
 | `update_cell` | Update cell source code |
+| `batch_update_cells` | Update multiple cells atomically |
+| `batch_insert_cells` | Insert multiple cells at once |
 | `update_and_execute` | Update a cell and run it in one operation |
 | `change_cell_type` | Change cell type (code ↔ markdown) |
 | `delete_cell` | Delete a cell |
@@ -49,6 +61,7 @@ src/
 | `copy_cells` | Copy cells within/between notebooks |
 | `move_cells` | Move/reorder cells within/between notebooks |
 | `clear_outputs` | Clear execution outputs |
+| `get_cell_outputs` | Get outputs without re-fetching source |
 | `get_user_focus` | See user's current cell via awareness |
 | `execute_cell` | Execute a cell, show outputs in JupyterLab |
 | `execute_range` | Execute multiple cells in sequence |
@@ -58,7 +71,10 @@ src/
 | `add_cell_tags` | Add tags to cell(s) |
 | `remove_cell_tags` | Remove tags from cell(s) |
 | `get_notebook_metadata` | Get notebook-level metadata |
+| `find_cells_by_tag` | Find cells with specific tags |
 | `set_notebook_metadata` | Set notebook-level metadata |
+| `get_diagnostics` | Get code errors/warnings without executing |
+| `get_hover_info` | Get docs/type info at a position |
 | `rename_notebook` | Rename a notebook file |
 | `diff_notebooks` | Compare two notebooks cell by cell |
 | `rename_symbol` | Scope-aware Python rename across cells (via jedi) |
@@ -105,7 +121,7 @@ Applied to: `update_cell`, `update_and_execute`, `delete_cell`, `change_cell_typ
 
 ### Cell Locking (Advisory)
 
-Agents can claim cells to prevent accidental overwrites. Locks are advisory and auto-expire (default 5 minutes):
+Agents can claim cells to prevent accidental overwrites. Locks are advisory and auto-expire (default 10 minutes):
 
 ```
 lock_cells(path, cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="data-agent", ttl_minutes=10)
@@ -222,6 +238,8 @@ claude mcp add -s user jupyter -- node $PWD/dist/index.js
 
 No token in config — just paste your JupyterLab URL when connecting:
 > "Connect to http://localhost:8888/lab?token=abc123"
+
+To launch JupyterLab with the right extensions: `uv tool install jlabx && jlabx` (separate project: https://github.com/ianhi/jlabx)
 
 ## Key Technologies
 
