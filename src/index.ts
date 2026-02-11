@@ -71,6 +71,21 @@ import {
 } from "./tool-helpers.js";
 import { toolSchemas } from "./schemas.js";
 import { renameSymbol } from "./rename.js";
+import {
+  recordChange,
+  getCellHistory,
+  getChangesSince,
+  getCurrentVersion,
+  getDeletedCellSource,
+} from "./cell-tracker.js";
+import {
+  createSnapshot,
+  getSnapshot,
+  listSnapshots as listSnapshotsForPath,
+  restoreSnapshotToYjs,
+  restoreSnapshotToFs,
+  diffSnapshot,
+} from "./snapshots.js";
 import { readdir, stat, rename as fsRename } from "fs/promises";
 import { join, resolve as pathResolve } from "path";
 
@@ -335,6 +350,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           await writeNotebook(resolved, notebook);
 
           const newId = (newCell.id || "").slice(0, 8);
+          recordChange(path, {
+            operation: "insert",
+            cellId: newCell.id || "",
+            cellIdShort: newId,
+            cellIndex: insertIndex,
+            newSource: source,
+          });
           const insertDiff = [
             `--- /dev/null`,
             `+++ ${path}:cell[${insertIndex}]`,
@@ -385,6 +407,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         cells.insert(insertIndex, [newCell]);
 
+        recordChange(path, {
+          operation: "insert",
+          cellId: newCellId,
+          cellIdShort: newCellId.slice(0, 8),
+          cellIndex: insertIndex,
+          newSource: source,
+        });
+
         // Show what was inserted
         const newId = newCellId.slice(0, 8);
         const insertDiff = [
@@ -433,6 +463,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           await writeNotebook(resolved, notebook);
 
           const cellIdStr = truncatedCellId(notebook.cells[resolvedIndex]);
+          recordChange(path, {
+            operation: "update",
+            cellId: getCellId(notebook.cells[resolvedIndex]) || "",
+            cellIdShort: cellIdStr || "",
+            cellIndex: resolvedIndex,
+            oldSource,
+            newSource: source,
+          });
           const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
           return {
             content: [{ type: "text", text: `Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${truncateDiff(diff)}` }],
@@ -483,6 +521,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const cellIdStr = truncatedCellId(cell);
+        recordChange(path, {
+          operation: "update",
+          cellId: getCellId(cell) || "",
+          cellIdShort: cellIdStr || "",
+          cellIndex: resolvedIndex,
+          oldSource,
+          newSource: source,
+        });
+
         const diff = generateUnifiedDiff(
           oldSource,
           source,
@@ -615,6 +662,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const cellType = getCellType(cell);
           const cellIdStr = truncatedCellId(cell);
 
+          recordChange(path, {
+            operation: "delete",
+            cellId: getCellId(cell) || "",
+            cellIdShort: cellIdStr || "",
+            cellIndex: resolvedIndex,
+            oldSource,
+          });
+
           notebook.cells.splice(resolvedIndex, 1);
           await writeNotebook(resolved, notebook);
 
@@ -663,6 +718,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const oldSource = extractSource(cell);
         const cellType = getCellType(cell);
         const cellIdStr = truncatedCellId(cell);
+
+        recordChange(path, {
+          operation: "delete",
+          cellId: getCellId(cell) || "",
+          cellIdShort: cellIdStr || "",
+          cellIndex: resolvedIndex,
+          oldSource,
+        });
 
         cells.delete(resolvedIndex, 1);
 
