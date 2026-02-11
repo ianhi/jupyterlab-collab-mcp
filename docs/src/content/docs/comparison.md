@@ -10,7 +10,7 @@ This project was developed independently before we discovered [datalayer/jupyter
 | Aspect | jupyterlab-collab-mcp | jupyter-mcp-server |
 |--------|----------------------|-------------------|
 | Language | TypeScript | Python |
-| Install | `git clone` + `npm install` | `pip install` + config |
+| Install | `npx` / `uvx` | `pip install` + config |
 | Transport | stdio | stdio + Streamable HTTP |
 | Connection | Paste JupyterLab URL | Separate env vars |
 | Search | `search_notebook` with regex | Not available |
@@ -22,7 +22,7 @@ This project was developed independently before we discovered [datalayer/jupyter
 | Streaming execution | Not yet (WebSocket ready) | Yes |
 | Run all cells | `execute_range` (full control) | `run-all-cells` |
 | Selected cell | `get_user_focus` (cursor + cell) | `get-selected-cell` |
-| Kernel listing | Not yet (easy to add) | `list_kernels` |
+| Kernel listing | `list_kernels` | `list_kernels` |
 
 ## Our advantages
 
@@ -30,7 +30,10 @@ This project was developed independently before we discovered [datalayer/jupyter
 
 ```bash
 # One command to register
-claude mcp add -s user jupyter -- node $PWD/dist/index.js
+claude mcp add -s user jupyter -- npx jupyterlab-collab-mcp
+
+# Launch JupyterLab with collaboration extensions
+uv tool install jlab-mcp && jlab-mcp
 
 # Connect by pasting the URL
 "Connect to http://localhost:8888/lab?token=abc123"
@@ -56,7 +59,7 @@ get_user_focus(path) → { focusedCell: 3, cursorPosition: 42 }
 
 Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](/agents/multi-agent/).
 
-### 51 tools
+### 52 tools
 
 Comprehensive coverage: batch operations, cross-notebook copy/move, cell ID addressing, metadata/tags, diagnostics, symbol rename, and more.
 

@@ -5,14 +5,23 @@ description: Launch JupyterLab with all the right extensions for MCP collaborati
 
 The `jlab-mcp` launcher starts JupyterLab with all the extensions needed for MCP collaboration, without modifying your project's dependencies. Also available as `jupyter-collab`.
 
+## Install
+
+```bash
+# Recommended — installs the jlab-mcp command globally
+uv tool install jlab-mcp
+
+# Or via pipx
+pipx install jlab-mcp
+```
+
+No Node.js required. The launcher is a standalone Python package.
+
 ## Usage
 
 ```bash
-# If installed via npm
+# Launch JupyterLab
 jlab-mcp
-
-# Or via npx (no install needed)
-npx jupyterlab-collab-mcp jlab-mcp
 
 # Skip user extensions (core only, useful for debugging)
 jlab-mcp --no-extras

@@ -30,7 +30,8 @@ An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks 
 
    ```bash
    # Easiest — auto-installs jupyter-collaboration + useful extensions
-   npx jupyterlab-collab-mcp jlab-mcp
+   uv tool install jlab-mcp
+   jlab-mcp
 
    # Or if you already have jupyter-collaboration installed
    jupyter lab
@@ -51,7 +52,7 @@ An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks 
 ## What's special
 
 - **Real-time sync** — edits appear instantly in JupyterLab via y-websocket, and vice versa
-- **51 MCP tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
+- **52 MCP tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
 - **Cell ID addressing** — stable references that survive insertions and deletions
 - **Multi-agent ready** — cell locking, change tracking, named snapshots, and per-agent attribution
 - **Context-efficient** — filter by cell type, skip outputs, limit images to keep Claude focused
@@ -83,7 +84,7 @@ Once connected, try:
 - _"Add a cell that imports pandas"_ — uses `insert_cell`
 - _"Search for any cells with errors"_ — uses `search_notebook`
 
-See the [Tool Reference](/tools/) for the full list of 51 tools.
+See the [Tool Reference](/tools/) for the full list of 52 tools.
 
 ## For agents, by agents
 
