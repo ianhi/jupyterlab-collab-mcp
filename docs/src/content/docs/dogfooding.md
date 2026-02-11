@@ -56,12 +56,14 @@ Every round, each agent wrote a feedback report. Here's what they asked for and 
 | Know what changed since I last looked | Shipped (v0.4.0) — `get_notebook_changes` polling |
 | Recover deleted cells | Shipped (v0.4.0) — `recover_cell` from change history |
 | Save/restore checkpoints | Shipped (v0.4.0) — named snapshots |
-| Insert multiple cells at once | Shipped (v0.7.0) — `batch_insert_cells` |
 | Track who made each change | Shipped (v0.5.0) — `client_name` parameter |
-| Longer lock TTL | Shipped (v0.7.0) — 10 minutes default |
 | Audit trail for lock overrides | Shipped (v0.5.0) — force-overrides recorded in change tracking |
+| Insert multiple cells at once | Shipped (v0.7.0) — `batch_insert_cells` |
+| Longer lock TTL | Shipped (v0.7.0) — 10 minutes default |
 | Cross-notebook change feed | Not yet implemented |
 | Per-cell `try_lock` (non-blocking) | Not yet implemented |
 | Kernel environment info | Not yet implemented |
 
 The [multi-agent guide](/agents/multi-agent/) documents the collaboration patterns that emerged from this process.
+
+For how to use these features, see [Best Practices](/agents/best-practices/) and [Multi-Agent Workflows](/agents/multi-agent/).

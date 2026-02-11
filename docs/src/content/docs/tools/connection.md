@@ -103,3 +103,7 @@ Create a new notebook file. Optionally open it immediately with a kernel.
 ```
 create_notebook(path="new_analysis.ipynb")
 ```
+
+---
+
+**Next:** [Reading notebooks →](/tools/reading/)

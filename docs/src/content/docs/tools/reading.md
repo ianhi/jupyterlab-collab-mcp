@@ -103,3 +103,7 @@ Get execution outputs from specific cells without fetching source code.
 # Check output of a specific cell, text only
 get_cell_outputs(path="analysis.ipynb", index=5, include_images=false)
 ```
+
+---
+
+**Next:** [Editing cells →](/tools/editing/)

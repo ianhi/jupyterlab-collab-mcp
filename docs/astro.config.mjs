@@ -20,7 +20,7 @@ export default defineConfig({
           "https://github.com/ianhi/jupyterlab-collab-mcp/edit/main/docs/",
       },
       sidebar: [
-        { label: "jlabx Launcher", slug: "jlabx" },
+        { label: "For Agents, by Agents", slug: "dogfooding" },
         {
           label: "Tools",
           items: [
@@ -34,6 +34,7 @@ export default defineConfig({
             { label: "Kernel & Analysis", slug: "tools/kernel" },
           ],
         },
+        { label: "jlabx Launcher", slug: "jlabx" },
         {
           label: "For Agents",
           items: [
@@ -41,7 +42,6 @@ export default defineConfig({
             { label: "Multi-Agent Workflows", slug: "agents/multi-agent" },
           ],
         },
-        { label: "For Agents, by Agents", slug: "dogfooding" },
         { label: "Comparison", slug: "comparison" },
         { label: "Changelog", slug: "changelog" },
       ],

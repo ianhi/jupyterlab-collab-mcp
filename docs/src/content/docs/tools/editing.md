@@ -212,3 +212,7 @@ replace_in_notebook(path="nb.ipynb", search="old_name", replace="new_name", dry_
 
 **Notes:**
 - For scope-aware Python renames, use [`rename_symbol`](/tools/kernel/#rename_symbol) instead
+
+---
+
+**Next:** [Executing code →](/tools/execution/)

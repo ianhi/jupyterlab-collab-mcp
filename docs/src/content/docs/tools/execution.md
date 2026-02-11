@@ -145,3 +145,7 @@ clear_outputs(path="nb.ipynb")
 # Clear one cell
 clear_outputs(path="nb.ipynb", index=5)
 ```
+
+---
+
+**Next:** [Collaboration features →](/tools/collaboration/)

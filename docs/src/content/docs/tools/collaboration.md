@@ -182,3 +182,7 @@ Shows which cells were added, deleted, modified, or unchanged. Modified cells in
 
 **Notes:**
 - Snapshots are in-memory (session-scoped, cleared on server restart)
+
+---
+
+**See also:** [Metadata & tags](/tools/metadata/), [Kernel & analysis tools](/tools/kernel/)
