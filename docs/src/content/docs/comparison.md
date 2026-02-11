@@ -57,7 +57,7 @@ get_user_focus(path) → { focusedCell: 3, cursorPosition: 42 }
 
 ### Multi-agent collaboration
 
-Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](/agents/multi-agent/).
+Cell locking, change tracking, named snapshots, and per-agent attribution make it safe to run multiple agents on the same notebook. See the [Multi-Agent Guide](../agents/multi-agent/).
 
 ### 53 tools
 

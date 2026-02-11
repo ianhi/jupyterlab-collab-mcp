@@ -64,6 +64,6 @@ Every round, each agent wrote a feedback report. Here's what they asked for and 
 | Per-cell `try_lock` (non-blocking) | Not yet implemented |
 | Kernel environment info | Not yet implemented |
 
-The [multi-agent guide](/agents/multi-agent/) documents the collaboration patterns that emerged from this process.
+The [multi-agent guide](../agents/multi-agent/) documents the collaboration patterns that emerged from this process.
 
-For how to use these features, see [Best Practices](/agents/best-practices/) and [Multi-Agent Workflows](/agents/multi-agent/).
+For how to use these features, see [Best Practices](../agents/best-practices/) and [Multi-Agent Workflows](../agents/multi-agent/).

@@ -3,7 +3,7 @@ title: Editing Tools
 description: Insert, update, delete, copy, move cells, and search-replace.
 ---
 
-Tools for modifying notebook cells. All editing tools support [cell ID addressing](/tools/collaboration/#cell-id-addressing) and sync changes in real-time to the JupyterLab browser.
+Tools for modifying notebook cells. All editing tools support [cell ID addressing](../collaboration/#cell-id-addressing) and sync changes in real-time to the JupyterLab browser.
 
 ## insert_cell
 
@@ -46,7 +46,7 @@ update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="print('updated')")
 **Notes:**
 - Only modifies source, not metadata/tags (use `add_cell_tags`/`set_cell_metadata` for those)
 - Use `clear_outputs` to remove outputs
-- Checks [human-focus protection](/tools/collaboration/#human-focus-protection) and [cell locks](/tools/collaboration/#cell-locking)
+- Checks [human-focus protection](../collaboration/#human-focus-protection) and [cell locks](../collaboration/#cell-locking)
 
 ---
 
@@ -113,7 +113,7 @@ Delete a cell from the notebook.
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution |
 
 **Notes:**
-- Deleted cells can be recovered with [`recover_cell`](/tools/collaboration/#recover_cell)
+- Deleted cells can be recovered with [`recover_cell`](../collaboration/#recover_cell)
 
 ---
 
@@ -211,8 +211,8 @@ replace_in_notebook(path="nb.ipynb", search="old_name", replace="new_name", dry_
 ```
 
 **Notes:**
-- For scope-aware Python renames, use [`rename_symbol`](/tools/kernel/#rename_symbol) instead
+- For scope-aware Python renames, use [`rename_symbol`](../kernel/#rename_symbol) instead
 
 ---
 
-**Next:** [Executing code →](/tools/execution/)
+**Next:** [Executing code →](../execution/)

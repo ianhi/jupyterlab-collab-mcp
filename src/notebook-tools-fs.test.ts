@@ -505,6 +505,37 @@ describe("file ops (filesystem)", () => {
     expect(reRead.metadata.kernelspec.name).toBe("python3");
   });
 
+  it("create_notebook with initial cells populates the notebook", async () => {
+    const path = join(tmpDir, "seeded.ipynb");
+    const nb = createEmptyNotebook("python3");
+    const cells = [
+      { source: "import numpy as np" },
+      { source: "# Introduction", cell_type: "markdown" },
+    ];
+    for (const cell of cells) {
+      const cellType = (cell as any).cell_type || "code";
+      nb.cells.push({
+        cell_type: cellType,
+        source: cell.source,
+        metadata: {},
+        id: crypto.randomUUID(),
+        ...(cellType === "code"
+          ? { outputs: [], execution_count: null }
+          : {}),
+      });
+    }
+    await writeNotebook(path, nb);
+
+    const reRead = await readNotebook(path);
+    expect(reRead.cells.length).toBe(2);
+    expect(reRead.cells[0].cell_type).toBe("code");
+    expect(reRead.cells[0].source).toBe("import numpy as np");
+    expect(reRead.cells[1].cell_type).toBe("markdown");
+    expect(reRead.cells[1].source).toBe("# Introduction");
+    expect(reRead.cells[0].id).toBeDefined();
+    expect(reRead.cells[1].id).toBeDefined();
+  });
+
   it("rename_notebook renames the file", async () => {
     const { rename } = await import("fs/promises");
 

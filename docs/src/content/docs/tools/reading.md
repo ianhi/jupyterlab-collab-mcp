@@ -106,4 +106,4 @@ get_cell_outputs(path="analysis.ipynb", index=5, include_images=false)
 
 ---
 
-**Next:** [Editing cells →](/tools/editing/)
+**Next:** [Editing cells →](../editing/)

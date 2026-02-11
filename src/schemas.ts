@@ -85,6 +85,23 @@ export const toolSchemas = [
           type: "boolean",
           description: "Open the notebook after creation. Default: true",
         },
+        cells: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              source: { type: "string", description: "Cell source code" },
+              cell_type: {
+                type: "string",
+                enum: ["code", "markdown"],
+                description: "Cell type (default: code)",
+              },
+            },
+            required: ["source"],
+          },
+          description:
+            "Optional initial cells to populate the notebook with",
+        },
       },
       required: ["path"],
     },

@@ -148,4 +148,4 @@ clear_outputs(path="nb.ipynb", index=5)
 
 ---
 
-**Next:** [Collaboration features →](/tools/collaboration/)
+**Next:** [Collaboration features →](../collaboration/)

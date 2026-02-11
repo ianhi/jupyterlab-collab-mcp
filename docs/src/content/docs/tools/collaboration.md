@@ -185,4 +185,4 @@ Shows which cells were added, deleted, modified, or unchanged. Modified cells in
 
 ---
 
-**See also:** [Metadata & tags](/tools/metadata/), [Kernel & analysis tools](/tools/kernel/)
+**See also:** [Metadata & tags](../metadata/), [Kernel & analysis tools](../kernel/)

@@ -7,25 +7,25 @@ The MCP server provides 53 tools for working with Jupyter notebooks. Tools are o
 
 ## Categories
 
-### [Connection](/tools/connection/)
+### [Connection](./connection/)
 Connect to JupyterLab, discover files and notebooks, open and create notebooks.
 
-### [Reading](/tools/reading/)
+### [Reading](./reading/)
 Read notebook content with filtering, get outlines, search/grep, fetch outputs.
 
-### [Editing](/tools/editing/)
+### [Editing](./editing/)
 Insert, update, delete, copy, move cells. Batch operations and search-replace.
 
-### [Execution](/tools/execution/)
+### [Execution](./execution/)
 Execute cells and code, run ranges, combo insert+execute and update+execute, clear outputs.
 
-### [Collaboration](/tools/collaboration/)
+### [Collaboration](./collaboration/)
 Cell IDs, human-focus protection, advisory locking, change tracking, snapshots.
 
-### [Metadata & Tags](/tools/metadata/)
+### [Metadata & Tags](./metadata/)
 Read and write cell/notebook metadata, manage tags, find cells by tag.
 
-### [Kernel & Analysis](/tools/kernel/)
+### [Kernel & Analysis](./kernel/)
 Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol rename, diff, notebook rename.
 
 ## Quick reference

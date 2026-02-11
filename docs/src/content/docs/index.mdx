@@ -5,7 +5,7 @@ description: An MCP server for real-time Jupyter notebook collaboration. Changes
 
 import { Steps, Aside } from "@astrojs/starlight/components";
 
-An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Changes appear instantly in your browser — no reloading. The server sees where your cursor is and won't touch the cell you're editing.
+An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Designed in collaboration with agents actively using it and giving feedback ([For Agents, by Agents](./dogfooding/)). Changes appear instantly in your browser — no reloading. The server sees where your cursor is and won't touch the cell you're editing.
 
 {/* TODO: Add demo GIF here */}
 {/* <img src="/demo.gif" alt="Demo of Claude Code editing a notebook in real-time" /> */}
@@ -37,7 +37,7 @@ An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks 
    jupyter lab
    ```
 
-   See the [`jlabx` docs](https://github.com/ianhi/jlabx) for configuration and environment detection.
+   See the [`jlabx` docs](https://ianhuntisaak.com/jlabx/) for configuration and environment detection.
 
 3. **Connect from Claude Code** — paste the URL from JupyterLab's terminal output:
 
@@ -79,18 +79,18 @@ You don't need to choose — if you're connected, tools use Jupyter mode. Otherw
 
 Once connected, try:
 
-- _"Read the notebook analysis.ipynb"_ — [`get_notebook_content`](/tools/reading/)
-- _"Run cell 3"_ — [`execute_cell`](/tools/execution/)
-- _"Add a cell that imports pandas"_ — [`insert_cell`](/tools/editing/)
-- _"Search for any cells with errors"_ — [`search_notebook`](/tools/reading/#search_notebook)
+- _"Read the notebook analysis.ipynb"_ — [`get_notebook_content`](./tools/reading/)
+- _"Run cell 3"_ — [`execute_cell`](./tools/execution/)
+- _"Add a cell that imports pandas"_ — [`insert_cell`](./tools/editing/)
+- _"Search for any cells with errors"_ — [`search_notebook`](./tools/reading/#search_notebook)
 
-See the [Tool Reference](/tools/) for the full list of 53 tools.
+See the [Tool Reference](./tools/) for the full list of 53 tools.
 
 ## For agents, by agents
 
-The real users of an MCP server aren't humans — they're AI agents. So this project was built by having agents use it and report back what was broken or missing. Over four rounds of increasingly complex multi-agent testing (up to 6 agents on 4 notebooks simultaneously), every collaboration feature — cell IDs, locking, change tracking, snapshots — was driven by agent feedback. Read the [full story](/dogfooding/).
+The real users of an MCP server aren't humans — they're AI agents. So this project was built by having agents use it and report back what was broken or missing. Over four rounds of increasingly complex multi-agent testing (up to 6 agents on 4 notebooks simultaneously), every collaboration feature — cell IDs, locking, change tracking, snapshots — was driven by agent feedback. Read the [full story](./dogfooding/).
 
-If you're building agent workflows, see the [agent best practices](/agents/best-practices/) and [multi-agent coordination patterns](/agents/multi-agent/).
+If you're building agent workflows, see the [agent best practices](./agents/best-practices/) and [multi-agent coordination patterns](./agents/multi-agent/).
 
 ## Development
 

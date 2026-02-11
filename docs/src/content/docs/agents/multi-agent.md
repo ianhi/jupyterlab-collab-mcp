@@ -3,7 +3,7 @@ title: Multi-Agent Workflows
 description: Patterns for multiple AI agents working on the same notebook simultaneously.
 ---
 
-This page covers coordination patterns when multiple agents work on the same notebook. For single-agent fundamentals, see [Best Practices](/agents/best-practices/).
+This page covers coordination patterns when multiple agents work on the same notebook. For single-agent fundamentals, see [Best Practices](../best-practices/).
 
 ## Coordination patterns
 
@@ -99,23 +99,23 @@ If something goes wrong:
 
 ## Tools for multi-agent work
 
-All collaboration-relevant tools in one place. For full parameter docs, see the [tool reference](/tools/).
+All collaboration-relevant tools in one place. For full parameter docs, see the [tool reference](../../tools/).
 
 | Tool | Purpose |
 |------|---------|
-| [`lock_cells`](/tools/collaboration/#lock_cells) | Claim cells before editing |
-| [`unlock_cells`](/tools/collaboration/#unlock_cells) | Release locks when done |
-| [`list_locks`](/tools/collaboration/#list_locks) | See who holds which locks |
-| [`get_user_focus`](/tools/collaboration/#get_user_focus) | See which cell a human is editing |
-| [`get_notebook_changes`](/tools/collaboration/#get_notebook_changes) | Poll for changes since a version |
-| [`get_cell_history`](/tools/collaboration/#get_cell_history) | Full change log for one cell |
-| [`recover_cell`](/tools/collaboration/#recover_cell) | Re-insert a deleted cell from history |
-| [`snapshot_notebook`](/tools/collaboration/#snapshot_notebook) | Save a named checkpoint |
-| [`restore_snapshot`](/tools/collaboration/#restore_snapshot) | Roll back to a checkpoint |
-| [`diff_snapshot`](/tools/collaboration/#diff_snapshot) | Compare checkpoint vs current state |
-| [`copy_cells`](/tools/editing/#copy_cells) | Duplicate cells between notebooks |
-| [`move_cells`](/tools/editing/#move_cells) | Transfer cells between notebooks |
-| [`batch_update_cells`](/tools/editing/#batch_update_cells) | Update multiple cells atomically |
-| [`batch_insert_cells`](/tools/editing/#batch_insert_cells) | Insert multiple cells at once |
-| [`replace_in_notebook`](/tools/editing/#replace_in_notebook) | Search and replace across cells |
-| [`execute_range`](/tools/execution/#execute_range) | Run a section of cells in sequence |
+| [`lock_cells`](../../tools/collaboration/#lock_cells) | Claim cells before editing |
+| [`unlock_cells`](../../tools/collaboration/#unlock_cells) | Release locks when done |
+| [`list_locks`](../../tools/collaboration/#list_locks) | See who holds which locks |
+| [`get_user_focus`](../../tools/collaboration/#get_user_focus) | See which cell a human is editing |
+| [`get_notebook_changes`](../../tools/collaboration/#get_notebook_changes) | Poll for changes since a version |
+| [`get_cell_history`](../../tools/collaboration/#get_cell_history) | Full change log for one cell |
+| [`recover_cell`](../../tools/collaboration/#recover_cell) | Re-insert a deleted cell from history |
+| [`snapshot_notebook`](../../tools/collaboration/#snapshot_notebook) | Save a named checkpoint |
+| [`restore_snapshot`](../../tools/collaboration/#restore_snapshot) | Roll back to a checkpoint |
+| [`diff_snapshot`](../../tools/collaboration/#diff_snapshot) | Compare checkpoint vs current state |
+| [`copy_cells`](../../tools/editing/#copy_cells) | Duplicate cells between notebooks |
+| [`move_cells`](../../tools/editing/#move_cells) | Transfer cells between notebooks |
+| [`batch_update_cells`](../../tools/editing/#batch_update_cells) | Update multiple cells atomically |
+| [`batch_insert_cells`](../../tools/editing/#batch_insert_cells) | Insert multiple cells at once |
+| [`replace_in_notebook`](../../tools/editing/#replace_in_notebook) | Search and replace across cells |
+| [`execute_range`](../../tools/execution/#execute_range) | Run a section of cells in sequence |

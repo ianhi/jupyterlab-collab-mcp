@@ -98,12 +98,28 @@ Create a new notebook file. Optionally open it immediately with a kernel.
 | `path` | string | Yes | — | Path for new notebook |
 | `kernel_name` | string | No | `python3` | Kernel to use |
 | `open` | boolean | No | `true` | Open the notebook after creation |
+| `cells` | array | No | `[]` | Initial cells to populate the notebook with |
 
-**Example:**
+Each cell in the `cells` array has:
+- `source` (string, required): Cell source code
+- `cell_type` (string, optional): `"code"` (default) or `"markdown"`
+
+**Examples:**
 ```
 create_notebook(path="new_analysis.ipynb")
 ```
 
+```
+create_notebook(
+  path="pipeline.ipynb",
+  cells=[
+    {"source": "import pandas as pd\nimport numpy as np"},
+    {"source": "# Data Pipeline", "cell_type": "markdown"},
+    {"source": "df = pd.read_csv('data.csv')"}
+  ]
+)
+```
+
 ---
 
-**Next:** [Reading notebooks →](/tools/reading/)
+**Next:** [Reading notebooks →](../reading/)

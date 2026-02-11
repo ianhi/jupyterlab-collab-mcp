@@ -13,8 +13,8 @@ import {
   listNotebookSessions,
   connectedNotebooks,
 } from "../connection.js";
-import { readdir, stat, rename as fsRename } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, stat, mkdir, rename as fsRename } from "node:fs/promises";
+import { join, dirname } from "node:path";
 
 export const handlers: Record<
   string,
@@ -308,10 +308,12 @@ export const handlers: Record<
       path,
       kernel_name = "python3",
       open = true,
+      cells = [],
     } = args as {
       path: string;
       kernel_name?: string;
       open?: boolean;
+      cells?: { source: string; cell_type?: string }[];
     };
 
     // Ensure path ends with .ipynb
@@ -329,11 +331,33 @@ export const handlers: Record<
         // ENOENT means file doesn't exist - that's what we want
       }
 
+      // Ensure parent directory exists
+      await mkdir(dirname(resolved), { recursive: true });
+
       const emptyNb = createEmptyNotebook(kernel_name);
+      for (const cell of cells) {
+        const cellType = cell.cell_type || "code";
+        emptyNb.cells.push({
+          cell_type: cellType,
+          source: cell.source,
+          metadata: {},
+          id: crypto.randomUUID(),
+          ...(cellType === "code"
+            ? { outputs: [], execution_count: null }
+            : {}),
+        });
+      }
       await writeNotebook(resolved, emptyNb);
 
+      const cellInfo =
+        cells.length > 0 ? ` (${cells.length} cells)` : "";
       return {
-        content: [{ type: "text", text: `Created notebook: ${nbPath}` }],
+        content: [
+          {
+            type: "text",
+            text: `Created notebook: ${nbPath}${cellInfo}`,
+          },
+        ],
       };
     }
 
@@ -345,9 +369,46 @@ export const handlers: Record<
       throw new Error(`File already exists: ${nbPath}`);
     }
 
-    // Create empty notebook structure
+    // Ensure parent directory exists
+    const parentDir = nbPath.includes("/")
+      ? nbPath.substring(0, nbPath.lastIndexOf("/"))
+      : null;
+    if (parentDir) {
+      const dirCheck = await apiFetch(
+        `/api/contents/${encodeURIComponent(parentDir)}`
+      );
+      if (!dirCheck.ok) {
+        const dirCreate = await apiFetch(
+          `/api/contents/${encodeURIComponent(parentDir)}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ type: "directory" }),
+          }
+        );
+        if (!dirCreate.ok) {
+          const err = await dirCreate.text();
+          throw new Error(
+            `Failed to create parent directory '${parentDir}': ${err}`
+          );
+        }
+      }
+    }
+
+    // Create notebook structure with optional initial cells
+    const initialCells = cells.map((cell) => {
+      const cellType = cell.cell_type || "code";
+      return {
+        cell_type: cellType,
+        source: cell.source,
+        metadata: {},
+        id: crypto.randomUUID(),
+        ...(cellType === "code"
+          ? { outputs: [], execution_count: null }
+          : {}),
+      };
+    });
     const emptyNotebook = {
-      cells: [],
+      cells: initialCells,
       metadata: {
         kernelspec: {
           display_name:
@@ -377,7 +438,9 @@ export const handlers: Record<
       throw new Error(`Failed to create notebook: ${error}`);
     }
 
-    let result = `Created notebook: ${nbPath}`;
+    const cellInfo =
+      cells.length > 0 ? ` (${cells.length} cells)` : "";
+    let result = `Created notebook: ${nbPath}${cellInfo}`;
 
     // Optionally open it
     if (open) {
