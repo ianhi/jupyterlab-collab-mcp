@@ -44,6 +44,7 @@ import {
   type NotebookData,
   type NotebookCell,
 } from "./notebook-fs.js";
+import { renameSymbol } from "./rename.js";
 import { readdir, stat, rename as fsRename } from "fs/promises";
 import { join, resolve as pathResolve } from "path";
 
@@ -694,6 +695,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ["path", "search", "replace"],
+        },
+      },
+      {
+        name: "rename_symbol",
+        description:
+          "Rename a Python symbol (variable, function, import) across all cells. Uses scope-aware analysis — won't rename occurrences in strings or comments. Requires jedi (auto-installed via uvx).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: {
+              type: "string",
+              description: "Notebook path",
+            },
+            cell_index: {
+              type: "number",
+              description: "Which cell contains the symbol to rename (0-indexed)",
+            },
+            line: {
+              type: "number",
+              description: "Line within the cell (0-indexed)",
+            },
+            character: {
+              type: "number",
+              description: "Column within the line (0-indexed)",
+            },
+            new_name: {
+              type: "string",
+              description: "The new name for the symbol",
+            },
+          },
+          required: ["path", "cell_index", "line", "character", "new_name"],
         },
       },
       {
@@ -2614,6 +2646,97 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: `${summary}\n\n${details}`,
             },
           ],
+        };
+      }
+
+      case "rename_symbol": {
+        const { path, cell_index, line, character, new_name } = args as {
+          path: string;
+          cell_index: number;
+          line: number;
+          character: number;
+          new_name: string;
+        };
+
+        if (!isJupyterConnected()) {
+          // Filesystem mode
+          const resolved = resolveNotebookPath(path);
+          const notebook = await readNotebook(resolved);
+          const cells = notebook.cells as { cell_type: string; source: string }[];
+
+          const result = await renameSymbol(cells, cell_index, line, character, new_name);
+
+          if (result.edits.length === 0) {
+            return {
+              content: [{ type: "text", text: "No changes — symbol may not have other references." }],
+            };
+          }
+
+          // Apply edits to the notebook
+          for (const edit of result.edits) {
+            notebook.cells[edit.cellIndex].source = edit.newSource;
+          }
+          await writeNotebook(resolved, notebook);
+
+          const details = result.edits
+            .map((e) => `  Cell ${e.cellIndex}: ${e.oldSource.split("\n")[0]}... → ${e.newSource.split("\n")[0]}...`)
+            .join("\n");
+
+          return {
+            content: [{
+              type: "text",
+              text: `Renamed "${result.oldName}" → "${result.newName}" in ${result.edits.length} cell(s)\n\n${details}`,
+            }],
+          };
+        }
+
+        // Jupyter mode — read cells from Yjs, do rename, apply edits back
+        const sessions = await listNotebookSessions();
+        const session = sessions.find((s) => s.path === path);
+        const { doc } = await connectToNotebook(path, session?.kernelId);
+        const yCells = doc.getArray("cells");
+
+        // Build cell array for renameSymbol
+        const cells: { cell_type: string; source: string }[] = [];
+        for (let i = 0; i < yCells.length; i++) {
+          const cell = yCells.get(i) as Y.Map<any>;
+          cells.push({
+            cell_type: getCellType(cell),
+            source: extractSource(cell),
+          });
+        }
+
+        const result = await renameSymbol(cells, cell_index, line, character, new_name);
+
+        if (result.edits.length === 0) {
+          return {
+            content: [{ type: "text", text: "No changes — symbol may not have other references." }],
+          };
+        }
+
+        // Apply edits back via Yjs
+        for (const edit of result.edits) {
+          const cell = yCells.get(edit.cellIndex) as Y.Map<any>;
+          if (cell instanceof Y.Map) {
+            const sourceField = cell.get("source");
+            if (sourceField instanceof Y.Text) {
+              sourceField.delete(0, sourceField.length);
+              sourceField.insert(0, edit.newSource);
+            } else {
+              cell.set("source", new Y.Text(edit.newSource));
+            }
+          }
+        }
+
+        const details = result.edits
+          .map((e) => `  Cell ${e.cellIndex}: ${e.oldSource.split("\n")[0]}... → ${e.newSource.split("\n")[0]}...`)
+          .join("\n");
+
+        return {
+          content: [{
+            type: "text",
+            text: `Renamed "${result.oldName}" → "${result.newName}" in ${result.edits.length} cell(s)\n\n${details}`,
+          }],
         };
       }
 
