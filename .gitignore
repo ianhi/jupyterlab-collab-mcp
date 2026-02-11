@@ -8,9 +8,11 @@ dist/
 .idea/
 .vscode/
 *.swp
+*.sublime-*
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Environment
 .env
@@ -23,10 +25,22 @@ dist/
 # Logs
 *.log
 
-# Python virtual environments
+# npm
+*.tgz
+
+# Python
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+*.egg
+build/
+uv.lock
+
+# Python tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Test environment (local only)
 test-jupyter/
