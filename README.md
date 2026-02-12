@@ -75,4 +75,4 @@ See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp
 
 ## License
 
-MIT
+BSD-3-Clause

@@ -2,10 +2,10 @@
   "name": "jupyterlab-collab-mcp",
   "version": "0.8.0",
   "description": "MCP server for real-time JupyterLab notebook collaboration",
-  "license": "MIT",
+  "license": "BSD-3-Clause",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ianhi/jupyterlab-collab-mcp.git"
+    "url": "git+https://github.com/ianhi/jupyterlab-collab-mcp.git"
   },
   "keywords": [
     "mcp",
