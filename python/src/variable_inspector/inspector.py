@@ -39,7 +39,7 @@ def _truncate_name(name: str, max_len: int | None) -> str:
     if max_len is None:
         return str(name)
     s = str(name)
-    return s if len(s) <= max_len else s[:max_len - 3] + "..."
+    return s if len(s) <= max_len else s[: max_len - 3] + "..."
 
 
 def _safe_repr(obj: Any, limit: int = 200) -> str:
@@ -81,7 +81,9 @@ def _module(obj: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_pandas_dataframe(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     dtypes = _safe_attr(obj, "dtypes", None)
@@ -96,7 +98,10 @@ def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int, max_name_leng
 
     total_cols = shape[1] if len(shape) > 1 else len(cols)
     result: dict[str, Any] = {
-        "name": name, "type": "DataFrame", "shape": list(shape), "columns": col_info,
+        "name": name,
+        "type": "DataFrame",
+        "shape": list(shape),
+        "columns": col_info,
     }
     if total_cols > max_items:
         result["columns_truncated"] = total_cols
@@ -133,7 +138,9 @@ def _inspect_pandas_series(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_polars_dataframe(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     schema = _safe_attr(obj, "schema", None)
@@ -148,7 +155,10 @@ def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_leng
 
     total_cols = shape[1] if len(shape) > 1 else len(cols)
     result: dict[str, Any] = {
-        "name": name, "type": "polars.DataFrame", "shape": list(shape), "columns": col_info,
+        "name": name,
+        "type": "polars.DataFrame",
+        "shape": list(shape),
+        "columns": col_info,
     }
     if total_cols > max_items:
         result["columns_truncated"] = total_cols
@@ -159,7 +169,9 @@ def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_leng
     return result
 
 
-def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_polars_lazyframe(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     """Inspect polars LazyFrame. NEVER calls .collect()."""
     try:
         schema = obj.collect_schema()
@@ -167,10 +179,15 @@ def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int, max_name_leng
         col_info = []
         for n in names:
             with contextlib.suppress(Exception):
-                col_info.append({"name": _truncate_name(n, max_name_length), "dtype": str(schema[n])})
+                col_info.append(
+                    {"name": _truncate_name(n, max_name_length), "dtype": str(schema[n])}
+                )
         total = len(schema.names())
         result: dict[str, Any] = {
-            "name": name, "type": "polars.LazyFrame", "columns": col_info, "lazy": True,
+            "name": name,
+            "type": "polars.LazyFrame",
+            "columns": col_info,
+            "lazy": True,
         }
         if total > max_items:
             result["columns_truncated"] = total
@@ -203,7 +220,9 @@ def _inspect_numpy(name: str, obj: Any) -> dict[str, Any]:
     }
 
 
-def _inspect_xarray_dataset(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_xarray_dataset(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.Dataset"}
     sizes = _safe_attr(obj, "sizes", None)
     if sizes is not None:
@@ -241,11 +260,15 @@ def _inspect_xarray_dataarray(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_xarray_datatree(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.DataTree"}
     children = _safe_attr(obj, "children", {})
     if children:
-        result["children"] = [_truncate_name(c, max_name_length) for c in islice(children.keys(), max_items)]
+        result["children"] = [
+            _truncate_name(c, max_name_length) for c in islice(children.keys(), max_items)
+        ]
         total = _safe_len(children)
         if total is not None and total > max_items:
             result["children_truncated"] = total
@@ -271,7 +294,9 @@ def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_lengt
     return result
 
 
-def _inspect_dict(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
+def _inspect_dict(
+    name: str, obj: Any, max_items: int, max_name_length: int | None = 60
+) -> dict[str, Any]:
     """Dict inspection: keys + capped repr of first values. No recursion."""
     n = _safe_len(obj)
     keys = list(islice(obj.keys(), max_items))
@@ -281,7 +306,7 @@ def _inspect_dict(name: str, obj: Any, max_items: int, max_name_length: int | No
         result["keys_truncated"] = n
     # Show type of each sampled value (cheap) + repr preview of first few
     values_preview: dict[str, str] = {}
-    for k in keys[:min(5, len(keys))]:
+    for k in keys[: min(5, len(keys))]:
         with contextlib.suppress(Exception):
             v = obj[k]
             type_name = _type_name(v)
@@ -327,7 +352,9 @@ def _inspect_generic(name: str, obj: Any) -> dict[str, Any]:
 _SCALAR_TYPES = (int, float, complex, str, bytes, bool, type(None))
 
 
-def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60) -> dict[str, Any]:
+def inspect_one(
+    name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60
+) -> dict[str, Any]:
     """
     Inspect a single variable. Returns a dict with type info and structural metadata.
 
@@ -338,7 +365,8 @@ def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int |
         name: Variable name
         obj: Object to inspect
         max_items: Maximum number of columns/keys/variables to show (default 20)
-        max_name_length: Maximum characters for column/key/variable names (default 60, None=unlimited)
+        max_name_length: Maximum chars for column/key/variable names
+            (default 60, None=unlimited)
     """
     mod = _module(obj)
     cls = _type_name(obj)
@@ -397,7 +425,8 @@ def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int |
 
     # Callable
     if callable(obj) and isinstance(
-        obj, (types.FunctionType, types.BuiltinFunctionType, type),
+        obj,
+        (types.FunctionType, types.BuiltinFunctionType, type),
     ):
         return {"name": name, "type": cls, "callable_name": _safe_attr(obj, "__name__", "?")}
 
@@ -418,7 +447,9 @@ def _format_mem(nbytes: int) -> str:
     return f" {nbytes}B"
 
 
-def summarize_one(name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60) -> str:
+def summarize_one(
+    name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60
+) -> str:
     """One-line summary derived from inspect_one() output."""
     info = inspect_one(name, obj, max_items, max_name_length)
     return _format_summary(info)
@@ -503,9 +534,16 @@ def _format_summary(info: dict[str, Any]) -> str:
 # Listing
 # ---------------------------------------------------------------------------
 
-_ALWAYS_SKIP = frozenset({
-    "In", "Out", "get_ipython", "exit", "quit", "open",
-})
+_ALWAYS_SKIP = frozenset(
+    {
+        "In",
+        "Out",
+        "get_ipython",
+        "exit",
+        "quit",
+        "open",
+    }
+)
 
 
 def list_user_variables(

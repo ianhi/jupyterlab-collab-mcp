@@ -34,10 +34,7 @@ class TestPerformance:
 
     def test_inspect_nested_dict_under_5ms(self) -> None:
         # Nested dict with scalar values (typical config/params)
-        nested = {
-            f"key_{i}": {f"inner_{j}": j * 0.1 for j in range(50)}
-            for i in range(20)
-        }
+        nested = {f"key_{i}": {f"inner_{j}": j * 0.1 for j in range(50)} for i in range(20)}
         elapsed = _time_ms(inspect_one, "n", nested, max_items=20)
         assert elapsed < 5, f"inspect_one on nested dict took {elapsed:.2f}ms (limit: 5ms)"
 
@@ -54,17 +51,21 @@ class TestPerformance:
             ns[f"scalar_{i}"] = i * 3.14
 
         elapsed = _time_ms(
-            list_user_variables, ns, detail="schema", max_variables=100, max_items=20,
+            list_user_variables,
+            ns,
+            detail="schema",
+            max_variables=100,
+            max_items=20,
         )
-        assert elapsed < 50, (
-            f"list_user_variables schema mode took {elapsed:.2f}ms (limit: 50ms)"
-        )
+        assert elapsed < 50, f"list_user_variables schema mode took {elapsed:.2f}ms (limit: 50ms)"
 
     def test_polars_lazyframe_no_collect(self) -> None:
         """Verify LazyFrame inspection never materializes data."""
         # Create a LazyFrame with an expensive operation
-        lf = pl.DataFrame({"x": range(1000)}).lazy().with_columns(
-            pl.col("x").cast(pl.Float64).alias("y")
+        lf = (
+            pl.DataFrame({"x": range(1000)})
+            .lazy()
+            .with_columns(pl.col("x").cast(pl.Float64).alias("y"))
         )
         elapsed = _time_ms(inspect_one, "lf", lf)
         assert elapsed < 5, f"inspect_one on LazyFrame took {elapsed:.2f}ms (limit: 5ms)"
@@ -78,28 +79,24 @@ class TestPerformance:
             coords={"time": np.arange(100), "x": np.arange(50), "y": np.arange(50)},
         )
         elapsed = _time_ms(inspect_one, "ds", ds)
-        assert elapsed < 5, (
-            f"inspect_one on xarray Dataset with 50 vars took {elapsed:.2f}ms"
-        )
+        assert elapsed < 5, f"inspect_one on xarray Dataset with 50 vars took {elapsed:.2f}ms"
 
     def test_summarize_large_dataframe_under_5ms(self, large_df: pd.DataFrame) -> None:
         elapsed = _time_ms(summarize_one, "df", large_df)
-        assert elapsed < 10, (
-            f"summarize_one on 10000x100 DataFrame took {elapsed:.2f}ms"
-        )
+        assert elapsed < 10, f"summarize_one on 10000x100 DataFrame took {elapsed:.2f}ms"
 
     def test_dict_of_large_arrays_under_5ms(self) -> None:
         """Dict with 100 large numpy arrays — should not repr every element."""
         d = {f"arr_{i}": np.random.randn(1000, 100) for i in range(100)}
         elapsed = _time_ms(inspect_one, "d", d, max_items=20)
-        assert elapsed < 5, (
-            f"inspect_one on dict with 100 large arrays took {elapsed:.2f}ms (limit: 5ms)"
-        )
+        assert (
+            elapsed < 5
+        ), f"inspect_one on dict with 100 large arrays took {elapsed:.2f}ms (limit: 5ms)"
 
     def test_list_of_dataframes_under_5ms(self) -> None:
         """List of 50 DataFrames — should not repr every element."""
         lst = [pd.DataFrame({"x": range(1000)}) for _ in range(50)]
         elapsed = _time_ms(inspect_one, "lst", lst)
-        assert elapsed < 5, (
-            f"inspect_one on list of 50 DataFrames took {elapsed:.2f}ms (limit: 5ms)"
-        )
+        assert (
+            elapsed < 5
+        ), f"inspect_one on list of 50 DataFrames took {elapsed:.2f}ms (limit: 5ms)"

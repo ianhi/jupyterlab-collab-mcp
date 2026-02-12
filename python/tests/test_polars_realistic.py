@@ -8,7 +8,6 @@ import polars as pl
 
 from variable_inspector.inspector import inspect_one, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # Struct columns
 # ---------------------------------------------------------------------------
@@ -53,9 +52,7 @@ class TestStructColumns:
         assert "Struct" in person_col["dtype"]
 
     def test_struct_summary(self) -> None:
-        df = pl.DataFrame(
-            {"data": [{"x": 1, "y": 2.0}, {"x": 3, "y": 4.0}]}
-        )
+        df = pl.DataFrame({"data": [{"x": 1, "y": 2.0}, {"x": 3, "y": 4.0}]})
         s = summarize_one("df", df)
         assert "polars.DataFrame" in s
         assert "Struct" in s
@@ -98,9 +95,7 @@ class TestListColumns:
 
 class TestEnumDtype:
     def test_basic_enum(self) -> None:
-        df = pl.DataFrame(
-            {"size": ["small", "medium", "large", "small"]}
-        ).with_columns(
+        df = pl.DataFrame({"size": ["small", "medium", "large", "small"]}).with_columns(
             pl.col("size").cast(pl.Enum(["small", "medium", "large"]))
         )
         info = inspect_one("df", df)
@@ -166,9 +161,7 @@ class TestTemporalTypes:
         assert "Duration" in col["dtype"]
 
     def test_time(self) -> None:
-        df = pl.DataFrame(
-            {"event_time": ["09:30:00", "14:45:30", "16:20:15"]}
-        ).with_columns(
+        df = pl.DataFrame({"event_time": ["09:30:00", "14:45:30", "16:20:15"]}).with_columns(
             pl.col("event_time").str.strptime(pl.Time, format="%H:%M:%S")
         )
         info = inspect_one("df", df)
@@ -208,9 +201,7 @@ class TestComplexLazyFrame:
     def test_lazy_chain(self) -> None:
         df = pl.DataFrame(
             {
-                "date": pl.date_range(
-                    pl.date(2024, 1, 1), pl.date(2024, 1, 10), "1d", eager=True
-                ),
+                "date": pl.date_range(pl.date(2024, 1, 1), pl.date(2024, 1, 10), "1d", eager=True),
                 "value": list(range(10)),
                 "category": ["A", "B"] * 5,
             }
@@ -232,9 +223,7 @@ class TestComplexLazyFrame:
     def test_lazy_performance(self) -> None:
         """LazyFrame inspect must not trigger .collect()."""
         df = pl.DataFrame({"x": range(100_000), "y": range(100_000)})
-        lf = df.lazy().filter(pl.col("x") > 50000).with_columns(
-            (pl.col("y") * 2).alias("y2")
-        )
+        lf = df.lazy().filter(pl.col("x") > 50000).with_columns((pl.col("y") * 2).alias("y2"))
         start = time.perf_counter()
         inspect_one("lf", lf)
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -331,9 +320,7 @@ class TestPolarsEdgeCases:
 
 class TestPolarsPerformance:
     def test_struct_under_5ms(self) -> None:
-        df = pl.DataFrame(
-            {"data": [{"k": i, "v": float(i)} for i in range(1000)]}
-        )
+        df = pl.DataFrame({"data": [{"k": i, "v": float(i)} for i in range(1000)]})
         start = time.perf_counter()
         inspect_one("df", df)
         elapsed_ms = (time.perf_counter() - start) * 1000

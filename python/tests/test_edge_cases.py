@@ -23,7 +23,6 @@ import pandas as pd
 
 from variable_inspector.inspector import inspect_one, list_user_variables, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # Edge-case objects
 # ---------------------------------------------------------------------------

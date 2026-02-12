@@ -9,7 +9,6 @@ import numpy.ma as ma
 
 from variable_inspector.inspector import inspect_one, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # Structured arrays
 # ---------------------------------------------------------------------------

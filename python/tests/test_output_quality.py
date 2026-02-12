@@ -20,7 +20,6 @@ import xarray as xr
 
 from variable_inspector.inspector import inspect_one, list_user_variables, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # pandas DataFrame: can an agent understand the schema?
 # ---------------------------------------------------------------------------
@@ -29,14 +28,16 @@ from variable_inspector.inspector import inspect_one, list_user_variables, summa
 class TestPandasOutputQuality:
     def test_mixed_dtypes_df_shows_all_column_info(self) -> None:
         """Agent needs to see every column name and dtype to write correct code."""
-        df = pd.DataFrame({
-            "user_id": [1, 2, 3],
-            "name": ["Alice", "Bob", "Charlie"],
-            "score": [95.5, None, 87.0],
-            "created": pd.to_datetime(["2024-01-01", "2024-02-01", "2024-03-01"]),
-            "active": [True, False, True],
-            "tier": pd.Categorical(["gold", "silver", "gold"]),
-        })
+        df = pd.DataFrame(
+            {
+                "user_id": [1, 2, 3],
+                "name": ["Alice", "Bob", "Charlie"],
+                "score": [95.5, None, 87.0],
+                "created": pd.to_datetime(["2024-01-01", "2024-02-01", "2024-03-01"]),
+                "active": [True, False, True],
+                "tier": pd.Categorical(["gold", "silver", "gold"]),
+            }
+        )
         info = inspect_one("df", df)
 
         # Agent must see shape
@@ -191,11 +192,13 @@ class TestXarrayOutputQuality:
 
     def test_datatree_shows_hierarchy(self) -> None:
         """Agent must understand the tree structure."""
-        tree = xr.DataTree.from_dict({
-            "/": xr.Dataset({"global_var": (["x"], [1, 2])}),
-            "/sensors": xr.Dataset({"reading": (["t"], [10, 20, 30])}),
-            "/sensors/calibration": xr.Dataset({"offset": (["t"], [0.1, 0.2, 0.3])}),
-        })
+        tree = xr.DataTree.from_dict(
+            {
+                "/": xr.Dataset({"global_var": (["x"], [1, 2])}),
+                "/sensors": xr.Dataset({"reading": (["t"], [10, 20, 30])}),
+                "/sensors/calibration": xr.Dataset({"offset": (["t"], [0.1, 0.2, 0.3])}),
+            }
+        )
         info = inspect_one("tree", tree)
         assert "sensors" in info["children"]
         assert info["total_nodes"] >= 3
@@ -243,6 +246,7 @@ class TestDictOutputQuality:
 class TestGenericOutputQuality:
     def test_custom_class_shows_type_and_repr(self) -> None:
         """Agent must at least know the type and see repr for unknown objects."""
+
         @dataclass
         class ModelConfig:
             name: str = "RandomForest"

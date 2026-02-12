@@ -10,7 +10,6 @@ import pytest
 
 from variable_inspector.inspector import inspect_one, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -28,9 +27,7 @@ def categorical_df() -> pd.DataFrame:
 
 @pytest.fixture
 def multiindex_row_df() -> pd.DataFrame:
-    idx = pd.MultiIndex.from_tuples(
-        [("A", 1), ("A", 2), ("B", 1), ("B", 2)], names=["group", "id"]
-    )
+    idx = pd.MultiIndex.from_tuples([("A", 1), ("A", 2), ("B", 1), ("B", 2)], names=["group", "id"])
     return pd.DataFrame({"val": [10, 20, 30, 40]}, index=idx)
 
 
@@ -113,7 +110,9 @@ def mixed_dtypes_df() -> pd.DataFrame:
             "name": ["Alice", "Bob", "Charlie", "David", "Eve"],
             "score": [1.1, 2.2, None, 4.4, 5.5],
             "active": [True, False, True, True, False],
-            "created_at": pd.to_datetime(["2024-01-01", "2024-02-01", None, "2024-04-01", "2024-05-01"]),
+            "created_at": pd.to_datetime(
+                ["2024-01-01", "2024-02-01", None, "2024-04-01", "2024-05-01"]
+            ),
             "category": pd.Categorical(["A", "B", "A", "C", "B"]),
         }
     )

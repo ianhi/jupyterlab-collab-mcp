@@ -9,7 +9,6 @@ import xarray as xr
 
 from variable_inspector.inspector import inspect_one, summarize_one
 
-
 # ---------------------------------------------------------------------------
 # Dataset with attributes and encoding
 # ---------------------------------------------------------------------------
@@ -74,8 +73,7 @@ class TestManyVariables:
 
     def test_performance_50_vars(self) -> None:
         ds = xr.Dataset(
-            {f"var_{i}": (["time", "x", "y"], np.zeros((100, 50, 50)))
-             for i in range(50)},
+            {f"var_{i}": (["time", "x", "y"], np.zeros((100, 50, 50))) for i in range(50)},
             coords={"time": np.arange(100), "x": np.arange(50), "y": np.arange(50)},
         )
         start = time.perf_counter()
@@ -143,11 +141,13 @@ class TestDataArrayRealistic:
 class TestDataTreeRealistic:
     def test_deep_tree(self) -> None:
         """Three-level deep tree."""
-        tree = xr.DataTree.from_dict({
-            "/": xr.Dataset({"root_var": (["x"], [1, 2, 3])}),
-            "/level1": xr.Dataset({"l1_var": (["x"], [4, 5, 6])}),
-            "/level1/level2": xr.Dataset({"l2_var": (["x"], [7, 8, 9])}),
-        })
+        tree = xr.DataTree.from_dict(
+            {
+                "/": xr.Dataset({"root_var": (["x"], [1, 2, 3])}),
+                "/level1": xr.Dataset({"l1_var": (["x"], [4, 5, 6])}),
+                "/level1/level2": xr.Dataset({"l2_var": (["x"], [7, 8, 9])}),
+            }
+        )
         info = inspect_one("tree", tree)
         assert info["type"] == "xarray.DataTree"
         assert "level1" in info["children"]
@@ -156,9 +156,7 @@ class TestDataTreeRealistic:
     def test_wide_tree(self) -> None:
         """Tree with many children at one level."""
         children = {
-            f"/station_{i}": xr.Dataset(
-                {"temp": (["time"], np.random.randn(10))}
-            )
+            f"/station_{i}": xr.Dataset({"temp": (["time"], np.random.randn(10))})
             for i in range(20)
         }
         children["/"] = xr.Dataset()
@@ -174,11 +172,13 @@ class TestDataTreeRealistic:
         assert info["type"] == "xarray.DataTree"
 
     def test_tree_summary(self) -> None:
-        tree = xr.DataTree.from_dict({
-            "/": xr.Dataset(),
-            "/a": xr.Dataset({"x": (["t"], [1, 2])}),
-            "/b": xr.Dataset({"y": (["t"], [3, 4])}),
-        })
+        tree = xr.DataTree.from_dict(
+            {
+                "/": xr.Dataset(),
+                "/a": xr.Dataset({"x": (["t"], [1, 2])}),
+                "/b": xr.Dataset({"y": (["t"], [3, 4])}),
+            }
+        )
         s = summarize_one("tree", tree)
         assert "xarray.DataTree" in s
         assert "3 nodes" in s
@@ -191,10 +191,12 @@ class TestDataTreeRealistic:
 
 class TestMixedDtypes:
     def test_string_and_numeric(self) -> None:
-        ds = xr.Dataset({
-            "temp": (["time"], np.zeros(5, dtype="float32")),
-            "label": (["time"], ["a", "b", "c", "d", "e"]),
-        })
+        ds = xr.Dataset(
+            {
+                "temp": (["time"], np.zeros(5, dtype="float32")),
+                "label": (["time"], ["a", "b", "c", "d", "e"]),
+            }
+        )
         info = inspect_one("ds", ds)
         # data_vars is now a list of dicts with 'name' and 'dtype'
         var_names = [v["name"] for v in info["data_vars"]]
@@ -202,7 +204,7 @@ class TestMixedDtypes:
         assert "label" in var_names
 
     def test_complex_dtype(self) -> None:
-        da = xr.DataArray(np.array([1+2j, 3+4j]), dims=["x"])
+        da = xr.DataArray(np.array([1 + 2j, 3 + 4j]), dims=["x"])
         info = inspect_one("da", da)
         assert "complex" in info["dtype"]
 
@@ -247,8 +249,7 @@ class TestXarrayEdgeCases:
 class TestXarrayPerformance:
     def test_dataset_under_5ms(self) -> None:
         ds = xr.Dataset(
-            {f"var_{i}": (["time", "x"], np.zeros((1000, 100)))
-             for i in range(20)},
+            {f"var_{i}": (["time", "x"], np.zeros((1000, 100))) for i in range(20)},
             coords={"time": np.arange(1000), "x": np.arange(100)},
         )
         start = time.perf_counter()
@@ -268,9 +269,7 @@ class TestXarrayPerformance:
 
     def test_datatree_under_5ms(self) -> None:
         children = {
-            f"/group_{i}": xr.Dataset(
-                {f"var_{j}": (["x"], np.zeros(100)) for j in range(5)}
-            )
+            f"/group_{i}": xr.Dataset({f"var_{j}": (["x"], np.zeros(100)) for j in range(5)})
             for i in range(10)
         }
         children["/"] = xr.Dataset()
@@ -282,8 +281,7 @@ class TestXarrayPerformance:
 
     def test_summary_under_5ms(self) -> None:
         ds = xr.Dataset(
-            {f"var_{i}": (["time", "x"], np.zeros((500, 200)))
-             for i in range(30)},
+            {f"var_{i}": (["time", "x"], np.zeros((500, 200))) for i in range(30)},
         )
         start = time.perf_counter()
         summarize_one("ds", ds, max_items=20)
