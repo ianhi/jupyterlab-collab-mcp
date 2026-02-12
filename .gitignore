@@ -21,6 +21,7 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+!test/fixtures/*.ipynb
 
 # Logs
 *.log
