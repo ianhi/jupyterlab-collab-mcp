@@ -43,7 +43,7 @@ src/
 | `list_files` | List files/notebooks in a directory |
 | `list_notebooks` | List open notebooks with active kernels |
 | `open_notebook` | Open a notebook and start its kernel |
-| `create_notebook` | Create a new notebook file |
+| `create_notebook` | Create a new notebook file (optionally with initial cells) |
 | `list_kernels` | List available kernel types and running instances |
 | `get_notebook_content` | Get cells with filtering (code only by default) |
 | `get_notebook_outline` | Get condensed structure (headers + first lines) |
