@@ -21,6 +21,14 @@ import {
   type NotebookSession,
 } from "../connection.js";
 import { renameSymbol } from "../rename.js";
+import {
+  generateListVariablesCode,
+  generateInspectVariablesCode,
+  formatBasicOutput,
+  formatSchemaOutput,
+  formatFullOutput,
+  formatOneInspection,
+} from "../variable-inspector.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "get_kernel_status": async (args) => {
@@ -69,10 +77,22 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "get_kernel_variables": async (args) => {
-    const { path, filter, include_private = false } = args as {
+    const {
+      path,
+      detail = "basic",
+      filter: filterName,
+      include_private: includePrivate = false,
+      max_variables: maxVariables = 50,
+      max_items: maxItems = 20,
+      max_name_length: maxNameLength = 60,
+    } = args as {
       path: string;
+      detail?: string;
       filter?: string;
       include_private?: boolean;
+      max_variables?: number;
+      max_items?: number;
+      max_name_length?: number | null;
     };
 
     const sessions = await listNotebookSessions();
@@ -89,27 +109,16 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       };
     }
 
-    // Python code to introspect variables
-    const inspectCode = `
-import json
-_vars = {}
-for _name in dir():
-    if _name.startswith('_'):
-        continue
-    try:
-        _obj = eval(_name)
-        _type = type(_obj).__name__
-        _repr = repr(_obj)
-        if len(_repr) > 100:
-            _repr = _repr[:97] + "..."
-        _vars[_name] = {"type": _type, "repr": _repr}
-    except:
-        pass
-print(json.dumps(_vars))
-del _vars, _name, _obj, _type, _repr
-`;
+    const code = generateListVariablesCode({
+      detail,
+      maxVariables,
+      maxItems,
+      maxNameLength,
+      filterName,
+      includePrivate,
+    });
 
-    const result = await executeCode(session.kernelId, inspectCode);
+    const result = await executeCode(session.kernelId, code);
 
     if (result.status === "error") {
       return {
@@ -123,52 +132,88 @@ del _vars, _name, _obj, _type, _repr
     }
 
     try {
-      const vars = JSON.parse(result.text.trim());
-      let entries = Object.entries(vars) as [string, { type: string; repr: string }][];
+      const parsed = JSON.parse(result.text.trim());
 
-      // Filter by name if specified
-      if (filter) {
-        const filterLower = filter.toLowerCase();
-        entries = entries.filter(([name]) => name.toLowerCase().includes(filterLower));
+      let text: string;
+      if (detail === "schema") {
+        text = formatSchemaOutput(path, parsed as string[]);
+      } else if (detail === "full") {
+        text = formatFullOutput(path, parsed as Record<string, unknown>[]);
+      } else {
+        text = formatBasicOutput(path, parsed as { name: string; type: string; repr: string }[], filterName);
       }
 
-      // Filter private variables
-      if (!include_private) {
-        entries = entries.filter(([name]) => !name.startsWith("_"));
-      }
-
-      if (entries.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: filter
-                ? `No variables matching "${filter}" in ${path}`
-                : `No user-defined variables in ${path}`,
-            },
-          ],
-        };
-      }
-
-      const lines = [`Variables in ${path} (${entries.length}):\n`];
-      for (const [name, info] of entries) {
-        lines.push(`  ${name}: ${info.type} = ${info.repr}`);
-      }
-
-      return {
-        content: [
-          {
-            type: "text",
-            text: lines.join("\n"),
-          },
-        ],
-      };
+      return { content: [{ type: "text", text }] };
     } catch {
       return {
         content: [
           {
             type: "text",
             text: `Could not parse kernel variables. Raw output: ${result.text}`,
+          },
+        ],
+      };
+    }
+  },
+
+  "inspect_variable": async (args) => {
+    const {
+      path,
+      names,
+      max_items: maxItems = 20,
+      max_name_length: maxNameLength = 60,
+    } = args as {
+      path: string;
+      names: string[];
+      max_items?: number;
+      max_name_length?: number | null;
+    };
+
+    if (!names || names.length === 0) {
+      throw new Error("'names' must be a non-empty array of variable names.");
+    }
+    if (names.length > 20) {
+      throw new Error("Maximum 20 variable names per call.");
+    }
+
+    const sessions = await listNotebookSessions();
+    const session = sessions.find((s) => s.path === path);
+
+    if (!session?.kernelId) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
+          },
+        ],
+      };
+    }
+
+    const code = generateInspectVariablesCode({ names, maxItems, maxNameLength });
+    const result = await executeCode(session.kernelId, code);
+
+    if (result.status === "error") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Failed to inspect variables: ${result.text}`,
+          },
+        ],
+      };
+    }
+
+    try {
+      const inspections = JSON.parse(result.text.trim()) as Record<string, unknown>[];
+      const parts = inspections.map((info) => formatOneInspection(info));
+      return { content: [{ type: "text", text: parts.join("\n\n") }] };
+    } catch {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Could not parse inspection results. Raw output: ${result.text}`,
           },
         ],
       };

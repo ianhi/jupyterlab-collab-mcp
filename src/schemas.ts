@@ -1176,6 +1176,12 @@ export const toolSchemas = [
           type: "string",
           description: "Notebook path",
         },
+        detail: {
+          type: "string",
+          enum: ["basic", "schema", "full"],
+          description:
+            "Detail level. 'basic' (default): name, type, repr. 'schema': one-line summaries with column/dtype info. 'full': structured inspection dicts.",
+        },
         filter: {
           type: "string",
           description: "Filter variables by name pattern (case-insensitive substring match). Default: show all",
@@ -1184,8 +1190,54 @@ export const toolSchemas = [
           type: "boolean",
           description: "Include variables starting with underscore. Default: false",
         },
+        max_variables: {
+          type: "number",
+          description:
+            "Maximum number of variables to return. Default: 50",
+        },
+        max_items: {
+          type: "number",
+          description:
+            "Maximum number of columns/keys/elements to enumerate per variable. Default: 20",
+        },
+        max_name_length: {
+          type: ["number", "null"],
+          description:
+            "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
+        },
       },
       required: ["path"],
+    },
+  },
+  {
+    name: "inspect_variable",
+    description:
+      "Inspect specific variables in the notebook's kernel with full structural metadata. Returns columns, dtypes, shapes, keys, and nested structure for DataFrames, arrays, dicts, and other types. Use get_kernel_variables first to discover variable names, then inspect_variable for details.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        names: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Variable names to inspect (max 20). Must be valid Python identifiers.",
+        },
+        max_items: {
+          type: "number",
+          description:
+            "Maximum number of columns/keys/elements to enumerate per variable. Default: 20",
+        },
+        max_name_length: {
+          type: ["number", "null"],
+          description:
+            "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
+        },
+      },
+      required: ["path", "names"],
     },
   },
   {

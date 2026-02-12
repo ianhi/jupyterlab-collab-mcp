@@ -1,9 +1,9 @@
 ---
 title: Tool Overview
-description: All 53 MCP tools organized by category.
+description: All 54 MCP tools organized by category.
 ---
 
-The MCP server provides 53 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
+The MCP server provides 54 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
 
 ## Categories
 
@@ -77,7 +77,8 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `get_notebook_metadata` | Metadata | Get notebook metadata |
 | `set_notebook_metadata` | Metadata | Set notebook metadata |
 | `get_kernel_status` | Kernel | Check kernel status |
-| `get_kernel_variables` | Kernel | List kernel variables |
+| `get_kernel_variables` | Kernel | List kernel variables with detail levels |
+| `inspect_variable` | Kernel | Deep-inspect variables (columns, dtypes, shapes) |
 | `interrupt_kernel` | Kernel | Stop running execution |
 | `restart_kernel` | Kernel | Restart kernel |
 | `get_diagnostics` | Kernel | Get errors/warnings |

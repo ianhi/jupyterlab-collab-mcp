@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "variable-inspector"
+version = "0.1.0"
+requires-python = ">=3.9"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-benchmark>=4.0",
+    "pandas>=2.0",
+    "polars>=0.20",
+    "numpy>=1.24",
+    "xarray>=2024.1",
+    "mypy>=1.8",
+    "ruff>=0.3",
+]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
