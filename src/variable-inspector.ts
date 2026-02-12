@@ -56,6 +56,7 @@ export function generateListVariablesCode(opts: {
   detail?: string;
   maxVariables?: number;
   maxItems?: number;
+  maxNameLength?: number;
   filterName?: string;
   includePrivate?: boolean;
 }): string {
@@ -63,6 +64,7 @@ export function generateListVariablesCode(opts: {
     detail = "basic",
     maxVariables = 50,
     maxItems = 20,
+    maxNameLength = 60,
     filterName,
     includePrivate = false,
   } = opts;
@@ -81,7 +83,8 @@ _vi_result = list_user_variables(
     _vi_ns,
     detail=${JSON.stringify(detail)},
     max_variables=${maxVariables},
-    max_items=${maxItems}${filterArg}${privateArg},
+    max_items=${maxItems},
+    max_name_length=${maxNameLength}${filterArg}${privateArg},
 )
 print(_vi_json.dumps(_vi_result, default=str))
 
@@ -99,8 +102,9 @@ del globals()["inspect_one"], globals()["summarize_one"], globals()["list_user_v
 export function generateInspectVariablesCode(opts: {
   names: string[];
   maxItems?: number;
+  maxNameLength?: number;
 }): string {
-  const { names, maxItems = 20 } = opts;
+  const { names, maxItems = 20, maxNameLength = 60 } = opts;
 
   // Validate names to prevent injection
   for (const name of names) {
@@ -122,7 +126,7 @@ _vi_results = []
 for _vi_name in _vi_names:
     try:
         _vi_obj = eval(_vi_name)
-        _vi_results.append(inspect_one(_vi_name, _vi_obj, max_items=${maxItems}))
+        _vi_results.append(inspect_one(_vi_name, _vi_obj, max_items=${maxItems}, max_name_length=${maxNameLength}))
     except NameError:
         _vi_results.append({"name": _vi_name, "error": "not defined"})
     except Exception as _vi_e:

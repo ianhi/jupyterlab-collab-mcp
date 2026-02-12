@@ -34,6 +34,14 @@ def _safe_len(obj: Any) -> int | None:
         return None
 
 
+def _truncate_name(name: str, max_len: int) -> str:
+    """Truncate long names. max_len=0 means no limit."""
+    if max_len == 0:
+        return str(name)
+    s = str(name)
+    return s if len(s) <= max_len else s[:max_len - 3] + "..."
+
+
 def _safe_repr(obj: Any, limit: int = 200) -> str:
     """Safe repr with character cap.
 
@@ -73,7 +81,7 @@ def _module(obj: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     dtypes = _safe_attr(obj, "dtypes", None)
@@ -84,7 +92,7 @@ def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int) -> dict[str, 
         if dtypes is not None:
             with contextlib.suppress(Exception):
                 dt = str(dtypes[c])
-        col_info.append({"name": str(c), "dtype": dt})
+        col_info.append({"name": _truncate_name(c, max_name_length), "dtype": dt})
 
     total_cols = shape[1] if len(shape) > 1 else len(cols)
     result: dict[str, Any] = {
@@ -125,7 +133,7 @@ def _inspect_pandas_series(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_polars_dataframe(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     schema = _safe_attr(obj, "schema", None)
@@ -136,7 +144,7 @@ def _inspect_polars_dataframe(name: str, obj: Any, max_items: int) -> dict[str, 
         if schema is not None:
             with contextlib.suppress(Exception):
                 dt = str(schema[c])
-        col_info.append({"name": str(c), "dtype": dt})
+        col_info.append({"name": _truncate_name(c, max_name_length), "dtype": dt})
 
     total_cols = shape[1] if len(shape) > 1 else len(cols)
     result: dict[str, Any] = {
@@ -151,7 +159,7 @@ def _inspect_polars_dataframe(name: str, obj: Any, max_items: int) -> dict[str, 
     return result
 
 
-def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     """Inspect polars LazyFrame. NEVER calls .collect()."""
     try:
         schema = obj.collect_schema()
@@ -159,7 +167,7 @@ def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int) -> dict[str, 
         col_info = []
         for n in names:
             with contextlib.suppress(Exception):
-                col_info.append({"name": n, "dtype": str(schema[n])})
+                col_info.append({"name": _truncate_name(n, max_name_length), "dtype": str(schema[n])})
         total = len(schema.names())
         result: dict[str, Any] = {
             "name": name, "type": "polars.LazyFrame", "columns": col_info, "lazy": True,
@@ -195,7 +203,7 @@ def _inspect_numpy(name: str, obj: Any) -> dict[str, Any]:
     }
 
 
-def _inspect_xarray_dataset(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_xarray_dataset(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.Dataset"}
     sizes = _safe_attr(obj, "sizes", None)
     if sizes is not None:
@@ -204,7 +212,7 @@ def _inspect_xarray_dataset(name: str, obj: Any, max_items: int) -> dict[str, An
     if data_vars is not None:
         var_list = []
         for var_name in islice(data_vars, max_items):
-            var_info = {"name": str(var_name)}
+            var_info = {"name": _truncate_name(var_name, max_name_length)}
             with contextlib.suppress(Exception):
                 var_obj = data_vars[var_name]
                 dtype = _safe_attr(var_obj, "dtype", None)
@@ -217,7 +225,7 @@ def _inspect_xarray_dataset(name: str, obj: Any, max_items: int) -> dict[str, An
             result["data_vars_truncated"] = total
     coords = _safe_attr(obj, "coords", None)
     if coords is not None:
-        result["coords"] = list(islice(coords, max_items))
+        result["coords"] = [_truncate_name(c, max_name_length) for c in islice(coords, max_items)]
     return result
 
 
@@ -233,11 +241,11 @@ def _inspect_xarray_dataarray(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_xarray_datatree(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.DataTree"}
     children = _safe_attr(obj, "children", {})
     if children:
-        result["children"] = list(islice(children.keys(), max_items))
+        result["children"] = [_truncate_name(c, max_name_length) for c in islice(children.keys(), max_items)]
         total = _safe_len(children)
         if total is not None and total > max_items:
             result["children_truncated"] = total
@@ -247,7 +255,7 @@ def _inspect_xarray_datatree(name: str, obj: Any, max_items: int) -> dict[str, A
         if data_vars is not None:
             var_list = []
             for var_name in islice(data_vars, max_items):
-                var_info = {"name": str(var_name)}
+                var_info = {"name": _truncate_name(var_name, max_name_length)}
                 with contextlib.suppress(Exception):
                     var_obj = data_vars[var_name]
                     dtype = _safe_attr(var_obj, "dtype", None)
@@ -263,12 +271,12 @@ def _inspect_xarray_datatree(name: str, obj: Any, max_items: int) -> dict[str, A
     return result
 
 
-def _inspect_dict(name: str, obj: Any, max_items: int) -> dict[str, Any]:
+def _inspect_dict(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
     """Dict inspection: keys + capped repr of first values. No recursion."""
     n = _safe_len(obj)
     keys = list(islice(obj.keys(), max_items))
     result: dict[str, Any] = {"name": name, "type": _type_name(obj), "length": n}
-    result["keys"] = [str(k) for k in keys]
+    result["keys"] = [_truncate_name(k, max_name_length) for k in keys]
     if n is not None and n > max_items:
         result["keys_truncated"] = n
     # Show type of each sampled value (cheap) + repr preview of first few
@@ -319,12 +327,18 @@ def _inspect_generic(name: str, obj: Any) -> dict[str, Any]:
 _SCALAR_TYPES = (int, float, complex, str, bytes, bool, type(None))
 
 
-def inspect_one(name: str, obj: Any, max_items: int = 20) -> dict[str, Any]:
+def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int = 60) -> dict[str, Any]:
     """
     Inspect a single variable. Returns a dict with type info and structural metadata.
 
     For DataFrames/arrays: structured column/dtype/shape info.
     For everything else: type + capped repr().
+
+    Args:
+        name: Variable name
+        obj: Object to inspect
+        max_items: Maximum number of columns/keys/variables to show (default 20)
+        max_name_length: Maximum characters for column/key/variable names (default 60, 0=unlimited)
     """
     mod = _module(obj)
     cls = _type_name(obj)
@@ -336,16 +350,16 @@ def inspect_one(name: str, obj: Any, max_items: int = 20) -> dict[str, Any]:
     # pandas
     if mod.startswith("pandas"):
         if cls == "DataFrame":
-            return _inspect_pandas_dataframe(name, obj, max_items)
+            return _inspect_pandas_dataframe(name, obj, max_items, max_name_length)
         if cls == "Series":
             return _inspect_pandas_series(name, obj)
 
     # polars
     if mod.startswith("polars"):
         if cls == "DataFrame":
-            return _inspect_polars_dataframe(name, obj, max_items)
+            return _inspect_polars_dataframe(name, obj, max_items, max_name_length)
         if cls == "LazyFrame":
-            return _inspect_polars_lazyframe(name, obj, max_items)
+            return _inspect_polars_lazyframe(name, obj, max_items, max_name_length)
         if cls == "Series":
             return _inspect_polars_series(name, obj)
 
@@ -356,15 +370,15 @@ def inspect_one(name: str, obj: Any, max_items: int = 20) -> dict[str, Any]:
     # xarray
     if mod.startswith("xarray"):
         if cls == "Dataset":
-            return _inspect_xarray_dataset(name, obj, max_items)
+            return _inspect_xarray_dataset(name, obj, max_items, max_name_length)
         if cls == "DataArray":
             return _inspect_xarray_dataarray(name, obj)
         if cls == "DataTree":
-            return _inspect_xarray_datatree(name, obj, max_items)
+            return _inspect_xarray_datatree(name, obj, max_items, max_name_length)
 
     # dict — show keys + value previews (no recursion)
     if isinstance(obj, dict):
-        return _inspect_dict(name, obj, max_items)
+        return _inspect_dict(name, obj, max_items, max_name_length)
 
     # list/tuple/set — length + repr (smart about large collections)
     if isinstance(obj, (list, tuple, set, frozenset)):
@@ -404,9 +418,9 @@ def _format_mem(nbytes: int) -> str:
     return f" {nbytes}B"
 
 
-def summarize_one(name: str, obj: Any, max_items: int = 20) -> str:
+def summarize_one(name: str, obj: Any, max_items: int = 20, max_name_length: int = 60) -> str:
     """One-line summary derived from inspect_one() output."""
-    info = inspect_one(name, obj, max_items)
+    info = inspect_one(name, obj, max_items, max_name_length)
     return _format_summary(info)
 
 
@@ -499,6 +513,7 @@ def list_user_variables(
     detail: str = "basic",
     max_variables: int = 50,
     max_items: int = 20,
+    max_name_length: int = 60,
     filter_name: str | None = None,
     include_private: bool = False,
 ) -> list[dict[str, Any]] | list[str]:
@@ -524,10 +539,10 @@ def list_user_variables(
     entries = entries[:max_variables]
 
     if detail == "schema":
-        return [summarize_one(vname, obj, max_items) for vname, obj in entries]
+        return [summarize_one(vname, obj, max_items, max_name_length) for vname, obj in entries]
 
     if detail == "full":
-        return [inspect_one(vname, obj, max_items) for vname, obj in entries]
+        return [inspect_one(vname, obj, max_items, max_name_length) for vname, obj in entries]
 
     # basic — current behavior
     result: list[dict[str, Any]] = []

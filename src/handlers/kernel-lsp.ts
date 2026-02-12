@@ -84,6 +84,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       include_private: includePrivate = false,
       max_variables: maxVariables = 50,
       max_items: maxItems = 20,
+      max_name_length: maxNameLength = 60,
     } = args as {
       path: string;
       detail?: string;
@@ -91,6 +92,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       include_private?: boolean;
       max_variables?: number;
       max_items?: number;
+      max_name_length?: number;
     };
 
     const sessions = await listNotebookSessions();
@@ -111,6 +113,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       detail,
       maxVariables,
       maxItems,
+      maxNameLength,
       filterName,
       includePrivate,
     });
@@ -158,10 +161,12 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       path,
       names,
       max_items: maxItems = 20,
+      max_name_length: maxNameLength = 60,
     } = args as {
       path: string;
       names: string[];
       max_items?: number;
+      max_name_length?: number;
     };
 
     if (!names || names.length === 0) {
@@ -185,7 +190,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       };
     }
 
-    const code = generateInspectVariablesCode({ names, maxItems });
+    const code = generateInspectVariablesCode({ names, maxItems, maxNameLength });
     const result = await executeCode(session.kernelId, code);
 
     if (result.status === "error") {

@@ -308,6 +308,8 @@ npm run watch
 
 **IMPORTANT: After `npm run build`, you must restart Claude Code** (or remove and re-add the MCP server) for tool schema changes to take effect. The MCP server process caches tool definitions at startup — rebuilding `dist/index.js` alone does NOT update the running server. If new tool parameters (e.g., `max_images`) aren't showing up, this is why.
 
+**Backwards compatibility**: This is a tool, not a library. Breaking changes to tool schemas are acceptable and expected during development. Users will simply restart Claude Code to get the updated tools. Do not maintain backwards compatibility for deprecated parameters or old behavior.
+
 ## JupyterLab API Endpoints
 
 | Endpoint | Method | Purpose |
