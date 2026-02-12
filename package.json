@@ -24,7 +24,8 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "python/src/variable_inspector/inspector.py"
   ],
   "scripts": {
     "build": "tsc",

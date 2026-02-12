@@ -15,7 +15,7 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 ```
 src/
 ├── index.ts        # Thin MCP server entry point (dispatches to handlers)
-├── handlers/       # All 53 tool handlers, organized by category
+├── handlers/       # All 54 tool handlers, organized by category
 │   ├── connection.ts   # connect_jupyter, list_files, list_notebooks, list_kernels, open/create/rename_notebook
 │   ├── cell-read.ts    # get_notebook_content, get_notebook_outline, search_notebook, replace_in_notebook
 │   ├── cell-write.ts   # insert_cell, update_cell, delete_cell(s), change_cell_type, copy/move_cells, batch ops
@@ -79,7 +79,8 @@ src/
 | `diff_notebooks` | Compare two notebooks cell by cell |
 | `rename_symbol` | Scope-aware Python rename across cells (via jedi) |
 | `get_kernel_status` | Check if kernel is idle/busy/dead |
-| `get_kernel_variables` | List variables in kernel (names, types, values) |
+| `get_kernel_variables` | List variables in kernel with basic/schema/full detail levels |
+| `inspect_variable` | Deep-inspect specific variables (columns, dtypes, keys, shapes) |
 | `interrupt_kernel` | Stop running execution |
 | `restart_kernel` | Restart kernel (clears all state) |
 | `get_cell_history` | View change log for a specific cell |
@@ -220,6 +221,44 @@ new_name: the new name for the symbol
 
 Unlike `replace_in_notebook`, this understands Python semantics — it won't rename occurrences in strings, comments, or unrelated scopes. Requires jedi (auto-installed via `uvx`, or install with `pip install jedi`).
 
+### Variable Inspector
+
+`get_kernel_variables` and `inspect_variable` provide fast, safe introspection of kernel state without writing code:
+
+```
+# Quick scan (basic mode)
+get_kernel_variables(path, detail="basic")  # name, type, repr
+
+# Agent-friendly summaries (schema mode - recommended)
+get_kernel_variables(path, detail="schema")  # one-line summaries with metadata
+# → "df: DataFrame (100×5) [date:datetime64[ns], price:float64, ...]"
+
+# Full structured metadata (full mode)
+get_kernel_variables(path, detail="full")  # complete dicts with all fields
+
+# Deep inspection of specific variables
+inspect_variable(path, names=["df", "results"])  # structured metadata
+```
+
+**Detail levels:**
+- **basic**: Fast, compact — name, type, short repr
+- **schema** (recommended for agents): One-line summaries with column/dtype info for DataFrames, shape for arrays, keys for dicts
+- **full**: Complete structured metadata for programmatic use
+
+**Supported libraries with specialized handlers:**
+- pandas: DataFrame/Series with columns, dtypes, shape, memory, MultiIndex support
+- polars: DataFrame/Series/LazyFrame (never triggers `.collect()`)
+- numpy: ndarray with shape, dtype, ndim, nbytes
+- xarray: Dataset/DataArray/DataTree with dims, data_vars (with dtypes), coords
+
+**Generic fallback:** For unknown types, returns type + repr + shape/dtype/len if available.
+
+**Safety guarantees:**
+- Never triggers lazy computation (polars `.collect()`, dask `.compute()`)
+- Never crashes on broken objects (all operations wrapped in try/except)
+- Performance: all inspections complete in <5ms per variable
+- Dict value previews show shapes for DataFrames/arrays instead of verbose repr
+
 ## Installation
 
 ```bash
@@ -265,6 +304,8 @@ npm run build
 npm run watch
 ```
 
+**Python**: Always use `uv` for Python operations (running tests, installing packages, managing environments). Example: `cd python && uv run pytest tests/ -v`
+
 **IMPORTANT: After `npm run build`, you must restart Claude Code** (or remove and re-add the MCP server) for tool schema changes to take effect. The MCP server process caches tool definitions at startup — rebuilding `dist/index.js` alone does NOT update the running server. If new tool parameters (e.g., `max_images`) aren't showing up, this is why.
 
 ## JupyterLab API Endpoints
@@ -305,9 +346,18 @@ When testing multi-agent collaboration on notebooks, use a team of 4+ agents wor
 5. **Concurrent inserts**: Multiple agents inserting cells in the same notebook simultaneously — cell IDs prevent index collisions.
 6. **Human-in-the-loop**: Human edits cells while agents work — agents should see focus-blocked errors and retry on different cells.
 
+### Team Lead Role
+
+The team lead acts as a **scientist/observer**, not a manager:
+- **Setup**: Design the task, scaffold the notebook, create the team and tasks, launch all agents simultaneously
+- **Observe**: Monitor the change log and notebook state for high-level issues
+- **Don't micromanage**: Let agents coordinate organically through messaging and kernel variable polling. Don't direct traffic, assign work to idle agents, or prevent conflicts — conflicts are valuable for stress testing
+- **Intervene only for systemic issues**: e.g., a shared kernel crash, a tool bug blocking all agents, or a fundamental misunderstanding of the task
+- **Avoid rigid dependency graphs**: Use `blockedBy` sparingly or not at all. Let agents discover data availability themselves via `get_kernel_variables` and communicate through messages. Organic coordination surfaces real collaboration pain points that artificial sequencing hides.
+
 Test phases:
 - Phase 1: Build & smoke test (`npm run build`, basic cell_id round-trip)
-- Phase 2: Multi-agent collaboration (4 agents, cell_id-based, parallel work)
+- Phase 2: Multi-agent collaboration (4+ agents, cell_id-based, parallel work)
 - Phase 3: Collect agent feedback on the experience and suggestions for harder tasks
 
 ## Important Notes

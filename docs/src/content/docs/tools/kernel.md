@@ -24,12 +24,90 @@ List variables defined in the notebook's kernel. Requires JupyterLab connection.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path |
+| `detail` | string | No | `basic` | Detail level: `basic`, `schema`, or `full` |
 | `filter` | string | No | show all | Filter by name pattern (case-insensitive substring match) |
 | `include_private` | boolean | No | `false` | Include variables starting with underscore |
+| `max_variables` | number | No | `50` | Maximum number of variables to return |
+| `max_items` | number | No | `20` | Max columns/keys/elements per variable |
+
+**Detail levels:**
+
+- **`basic`**: Name, type, and short repr. Fast and compact.
+- **`schema`** (recommended): One-line summaries with column/dtype info for DataFrames, shape for arrays, keys for dicts. Best for agents.
+- **`full`**: Complete structured metadata. Verbose but machine-readable.
 
 **Example:**
 ```
-get_kernel_variables(path="nb.ipynb", filter="df")
+# Quick scan (basic)
+get_kernel_variables(path="nb.ipynb")
+
+# Detailed DataFrame/array metadata (schema)
+get_kernel_variables(path="nb.ipynb", detail="schema")
+
+# Filter for specific variables
+get_kernel_variables(path="nb.ipynb", filter="df", detail="schema")
+```
+
+**Output example (schema mode):**
+```
+df: DataFrame (100×5) [date:datetime64[ns], price:float64, volume:int64, ...]
+arr: ndarray float64 (1000, 3) 23.4KB
+results: dict (15 keys) [model_a, model_b, baseline, ...]
+```
+
+---
+
+## inspect_variable
+
+Deep-inspect specific variables for full structural metadata. Returns columns, dtypes, shapes, keys, and nested structure. Use `get_kernel_variables` first to discover variable names, then `inspect_variable` for details.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `path` | string | Yes | — | Notebook path |
+| `names` | array | Yes | — | Variable names to inspect (max 20) |
+| `max_items` | number | No | `20` | Max columns/keys/elements per variable |
+
+**Example:**
+```
+# Inspect DataFrames
+inspect_variable(path="nb.ipynb", names=["df", "results"])
+
+# Inspect with more detail
+inspect_variable(path="nb.ipynb", names=["data"], max_items=50)
+```
+
+**Supported types with specialized handlers:**
+
+- **pandas.DataFrame**: columns (name+dtype), shape, memory_bytes, MultiIndex support
+- **polars.DataFrame**: columns (name+dtype), shape, estimated_size_bytes
+- **polars.LazyFrame**: schema without triggering computation
+- **numpy.ndarray**: shape, dtype, ndim, nbytes
+- **xarray.Dataset**: dims, data_vars (with dtypes), coords
+- **xarray.DataArray**: dims, dtype
+- **xarray.DataTree**: children, data_vars, dims, total_nodes
+- **dict**: keys, values_preview (shows type+shape for DataFrames/arrays)
+
+**Generic fallback:** For unknown types, returns type, repr, and shape/dtype/len if available.
+
+**Safety:**
+- Never triggers lazy computation (polars `.collect()`, dask `.compute()`)
+- Never crashes on broken objects
+- All operations complete in <5ms per variable
+
+**Output example:**
+```json
+{
+  "name": "df",
+  "type": "DataFrame",
+  "shape": [1000, 5],
+  "columns": [
+    {"name": "date", "dtype": "datetime64[ns]"},
+    {"name": "price", "dtype": "float64"},
+    {"name": "volume", "dtype": "int64"}
+  ],
+  "memory_bytes": 40000,
+  "index_dtype": "RangeIndex"
+}
 ```
 
 ---
