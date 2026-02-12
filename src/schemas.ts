@@ -1201,9 +1201,9 @@ export const toolSchemas = [
             "Maximum number of columns/keys/elements to enumerate per variable. Default: 20",
         },
         max_name_length: {
-          type: "number",
+          type: ["number", "null"],
           description:
-            "Maximum characters for column/key/variable names. Default: 60. Use 0 for unlimited (may use more context).",
+            "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
         },
       },
       required: ["path"],
@@ -1232,9 +1232,9 @@ export const toolSchemas = [
             "Maximum number of columns/keys/elements to enumerate per variable. Default: 20",
         },
         max_name_length: {
-          type: "number",
+          type: ["number", "null"],
           description:
-            "Maximum characters for column/key/variable names. Default: 60. Use 0 for unlimited (may use more context).",
+            "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
         },
       },
       required: ["path", "names"],

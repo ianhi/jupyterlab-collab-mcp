@@ -34,9 +34,9 @@ def _safe_len(obj: Any) -> int | None:
         return None
 
 
-def _truncate_name(name: str, max_len: int) -> str:
-    """Truncate long names. max_len=0 means no limit."""
-    if max_len == 0:
+def _truncate_name(name: str, max_len: int | None) -> str:
+    """Truncate long names. max_len=None means no limit."""
+    if max_len is None:
         return str(name)
     s = str(name)
     return s if len(s) <= max_len else s[:max_len - 3] + "..."
@@ -81,7 +81,7 @@ def _module(obj: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_pandas_dataframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     dtypes = _safe_attr(obj, "dtypes", None)
@@ -133,7 +133,7 @@ def _inspect_pandas_series(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     shape = _safe_attr(obj, "shape", ())
     cols = list(islice(_safe_attr(obj, "columns", []), max_items))
     schema = _safe_attr(obj, "schema", None)
@@ -159,7 +159,7 @@ def _inspect_polars_dataframe(name: str, obj: Any, max_items: int, max_name_leng
     return result
 
 
-def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_polars_lazyframe(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     """Inspect polars LazyFrame. NEVER calls .collect()."""
     try:
         schema = obj.collect_schema()
@@ -203,7 +203,7 @@ def _inspect_numpy(name: str, obj: Any) -> dict[str, Any]:
     }
 
 
-def _inspect_xarray_dataset(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_xarray_dataset(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.Dataset"}
     sizes = _safe_attr(obj, "sizes", None)
     if sizes is not None:
@@ -241,7 +241,7 @@ def _inspect_xarray_dataarray(name: str, obj: Any) -> dict[str, Any]:
     return result
 
 
-def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.DataTree"}
     children = _safe_attr(obj, "children", {})
     if children:
@@ -271,7 +271,7 @@ def _inspect_xarray_datatree(name: str, obj: Any, max_items: int, max_name_lengt
     return result
 
 
-def _inspect_dict(name: str, obj: Any, max_items: int, max_name_length: int = 60) -> dict[str, Any]:
+def _inspect_dict(name: str, obj: Any, max_items: int, max_name_length: int | None = 60) -> dict[str, Any]:
     """Dict inspection: keys + capped repr of first values. No recursion."""
     n = _safe_len(obj)
     keys = list(islice(obj.keys(), max_items))
@@ -327,7 +327,7 @@ def _inspect_generic(name: str, obj: Any) -> dict[str, Any]:
 _SCALAR_TYPES = (int, float, complex, str, bytes, bool, type(None))
 
 
-def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int = 60) -> dict[str, Any]:
+def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60) -> dict[str, Any]:
     """
     Inspect a single variable. Returns a dict with type info and structural metadata.
 
@@ -338,7 +338,7 @@ def inspect_one(name: str, obj: Any, max_items: int = 20, max_name_length: int =
         name: Variable name
         obj: Object to inspect
         max_items: Maximum number of columns/keys/variables to show (default 20)
-        max_name_length: Maximum characters for column/key/variable names (default 60, 0=unlimited)
+        max_name_length: Maximum characters for column/key/variable names (default 60, None=unlimited)
     """
     mod = _module(obj)
     cls = _type_name(obj)
@@ -418,7 +418,7 @@ def _format_mem(nbytes: int) -> str:
     return f" {nbytes}B"
 
 
-def summarize_one(name: str, obj: Any, max_items: int = 20, max_name_length: int = 60) -> str:
+def summarize_one(name: str, obj: Any, max_items: int = 20, max_name_length: int | None = 60) -> str:
     """One-line summary derived from inspect_one() output."""
     info = inspect_one(name, obj, max_items, max_name_length)
     return _format_summary(info)
@@ -513,7 +513,7 @@ def list_user_variables(
     detail: str = "basic",
     max_variables: int = 50,
     max_items: int = 20,
-    max_name_length: int = 60,
+    max_name_length: int | None = 60,
     filter_name: str | None = None,
     include_private: bool = False,
 ) -> list[dict[str, Any]] | list[str]:

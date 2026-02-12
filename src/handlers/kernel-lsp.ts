@@ -92,7 +92,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       include_private?: boolean;
       max_variables?: number;
       max_items?: number;
-      max_name_length?: number;
+      max_name_length?: number | null;
     };
 
     const sessions = await listNotebookSessions();
@@ -166,7 +166,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       path: string;
       names: string[];
       max_items?: number;
-      max_name_length?: number;
+      max_name_length?: number | null;
     };
 
     if (!names || names.length === 0) {

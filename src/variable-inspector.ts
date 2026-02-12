@@ -56,7 +56,7 @@ export function generateListVariablesCode(opts: {
   detail?: string;
   maxVariables?: number;
   maxItems?: number;
-  maxNameLength?: number;
+  maxNameLength?: number | null;
   filterName?: string;
   includePrivate?: boolean;
 }): string {
@@ -71,6 +71,7 @@ export function generateListVariablesCode(opts: {
 
   const filterArg = filterName ? `, filter_name=${JSON.stringify(filterName)}` : "";
   const privateArg = includePrivate ? ", include_private=True" : "";
+  const nameLengthArg = maxNameLength === null ? "None" : maxNameLength;
 
   return `
 # --- variable inspector (ephemeral) ---
@@ -84,7 +85,7 @@ _vi_result = list_user_variables(
     detail=${JSON.stringify(detail)},
     max_variables=${maxVariables},
     max_items=${maxItems},
-    max_name_length=${maxNameLength}${filterArg}${privateArg},
+    max_name_length=${nameLengthArg}${filterArg}${privateArg},
 )
 print(_vi_json.dumps(_vi_result, default=str))
 
@@ -102,7 +103,7 @@ del globals()["inspect_one"], globals()["summarize_one"], globals()["list_user_v
 export function generateInspectVariablesCode(opts: {
   names: string[];
   maxItems?: number;
-  maxNameLength?: number;
+  maxNameLength?: number | null;
 }): string {
   const { names, maxItems = 20, maxNameLength = 60 } = opts;
 
@@ -114,6 +115,7 @@ export function generateInspectVariablesCode(opts: {
   }
 
   const namesList = names.map((n) => JSON.stringify(n)).join(", ");
+  const nameLengthArg = maxNameLength === null ? "None" : maxNameLength;
 
   return `
 # --- variable inspector (ephemeral) ---
@@ -126,7 +128,7 @@ _vi_results = []
 for _vi_name in _vi_names:
     try:
         _vi_obj = eval(_vi_name)
-        _vi_results.append(inspect_one(_vi_name, _vi_obj, max_items=${maxItems}, max_name_length=${maxNameLength}))
+        _vi_results.append(inspect_one(_vi_name, _vi_obj, max_items=${maxItems}, max_name_length=${nameLengthArg}))
     except NameError:
         _vi_results.append({"name": _vi_name, "error": "not defined"})
     except Exception as _vi_e:
