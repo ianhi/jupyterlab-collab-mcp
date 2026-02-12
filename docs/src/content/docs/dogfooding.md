@@ -44,6 +44,21 @@ Results:
 
 **Features added:** `recover_cell` gained `client_name` for proper attribution, lock override audit trail.
 
+## Preserving agent context
+
+A recurring theme across rounds was context management. Agents that read full notebooks or rendered every plot quickly ran out of useful context window. This drove a set of tools and defaults designed to give agents situational awareness without wasting tokens:
+
+- **`get_notebook_outline`** — condensed view of the notebook structure (headers + first lines) instead of reading every cell
+- **`get_notebook_changes`** — incremental polling ("what changed since version N?") so agents don't re-read the whole notebook
+- **`diff_snapshot`** — compare current state against a named checkpoint, with inline diffs showing exactly what changed
+- **`diff_notebooks`** — cell-by-cell comparison of two notebooks
+- **`search_notebook`** — grep through source and outputs to find specific content without reading everything
+- **`get_cell_outputs`** — fetch outputs for specific cells without re-fetching source
+- **`max_images` / `include_images`** — control image output on execute tools to prevent plot-heavy cells from flooding context
+- **Code-only by default** — `get_notebook_content` returns only code cells with no outputs unless explicitly requested
+
+These aren't just convenience features — they're what let agents work on large notebooks without losing track of their task.
+
 ## Agent-requested features
 
 Every round, each agent wrote a feedback report. Here's what they asked for and what shipped:

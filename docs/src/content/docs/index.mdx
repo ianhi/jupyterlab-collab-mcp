@@ -5,7 +5,7 @@ description: An MCP server for real-time Jupyter notebook collaboration. Changes
 
 import { Steps, Aside } from "@astrojs/starlight/components";
 
-An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Designed in collaboration with agents actively using it and giving feedback ([For Agents, by Agents](./dogfooding/)). Changes appear instantly in your browser — no reloading. The server sees where your cursor is and won't touch the cell you're editing.
+An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks with real-time collaboration. Designed in collaboration with agents actively using it and giving feedback ([For Agents, by Agents](./dogfooding/)). Tools are built to preserve agent context — outlines, diffs, incremental change polling, and image limits let agents stay aware of what's happening without burning through their context window. Changes appear instantly in your browser — no reloading. The server sees where your cursor is and won't touch the cell you're editing.
 
 {/* TODO: Add demo GIF here */}
 {/* <img src="/demo.gif" alt="Demo of Claude Code editing a notebook in real-time" /> */}
@@ -55,7 +55,7 @@ An MCP server that lets AI assistants read, edit, and execute Jupyter notebooks 
 - **53 MCP tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
 - **Cell ID addressing** — stable references that survive insertions and deletions
 - **Multi-agent ready** — cell locking, change tracking, named snapshots, and per-agent attribution
-- **Context-efficient** — filter by cell type, skip outputs, limit images to keep Claude focused
+- **Context-aware** — agents stay informed without blowing their context window: outlines, diffs, incremental change polling, image limits, cell-type filtering, and output-free reads give situational awareness at minimal token cost
 - **No extension needed** — uses JupyterLab's built-in `jupyter-collaboration` system
 
 ## How it works
