@@ -11,7 +11,7 @@ Claude Code  ←—stdio—→  MCP Server  ←—y-websocket—→  JupyterLab
 Claude Code can already edit files, but notebooks are special — they have cells, kernels, outputs, and a live browser UI. This MCP server bridges the gap:
 
 - **Real-time sync** — edits appear instantly in JupyterLab via y-websocket
-- **53 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
+- **55 tools** — read, edit, execute, search, diff, tag, lock, snapshot, and more
 - **Cell ID addressing** — stable references that survive insertions and deletions
 - **Multi-agent ready** — cell locking, change tracking, and per-agent attribution
 - **Context-efficient** — filter by cell type, skip outputs, limit images
@@ -72,6 +72,52 @@ The docs site has detailed tool reference pages, parameter tables, examples, and
 ## Related Projects
 
 See also [datalayer/jupyter-mcp-server](https://github.com/datalayer/jupyter-mcp-server) — a Python-based alternative with Streamable HTTP transport and streaming execution. See the [comparison page](https://ianhi.github.io/jupyterlab-collab-mcp/comparison/) for detailed differences.
+
+## Development
+
+### Setup
+
+```bash
+git clone https://github.com/ianhi/jupyterlab-collab-mcp.git
+cd jupyterlab-collab-mcp
+npm install
+```
+
+### Dev workflow
+
+Point the MCP server at your local build and run the TypeScript compiler in watch mode:
+
+```bash
+claude mcp add -s user jupyter -- node $PWD/dist/index.js
+npm run build    # initial build
+npm run watch    # recompile on file changes (run in a separate terminal)
+```
+
+After each recompile, run `/mcp` in Claude Code to reconnect to the updated server. No need to remove and re-add the MCP config.
+
+> **Why not `tsx --watch`?** MCP servers are long-running stdio processes. `tsx --watch` detects the server as "completed" and kills it, breaking the connection.
+
+### Build + test
+
+```bash
+npm run build          # compile TypeScript to dist/
+npm run watch          # same, but recompile on changes
+npm test               # run unit tests (vitest)
+npm run test:watch     # run tests in watch mode
+```
+
+### Integration testing
+
+Requires a running JupyterLab with `jupyter-collaboration`:
+
+```bash
+jlabx                                    # start JupyterLab (or jupyter lab)
+JUPYTER_TOKEN=<token> npm run test:integration   # run src/test.ts against it
+```
+
+### After changing tool schemas
+
+If you add/remove tools or change their parameters, run `/mcp` in Claude Code to reconnect. The server caches tool definitions at startup, so a reconnect is needed for schema changes to take effect.
 
 ## License
 

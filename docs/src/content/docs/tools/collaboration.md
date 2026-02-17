@@ -185,4 +185,25 @@ Shows which cells were added, deleted, modified, or unchanged. Modified cells in
 
 ---
 
+## Issue reporting
+
+### report_issue
+
+Submit a feedback report about a tool bug, hang, missing feature, or general observation. Reports are persisted to a JSONL file (`~/.jupyter-mcp-reports.jsonl`) for developer review.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `category` | string | Yes | One of: `tool_bug`, `hang`, `missing_feature`, `observation`, `user_feedback` |
+| `summary` | string | Yes | One-line description |
+| `tool_name` | string | No | Which MCP tool was involved |
+| `path` | string | No | Notebook path |
+| `details` | string | No | Error messages or reproduction steps |
+
+**Notes:**
+- All inputs are defensively coerced to strings and truncated (summary: 500 chars, details: 2000 chars) to keep writes atomic
+- The reports file is automatically rotated when it exceeds 1MB
+- Safe for concurrent writes from multiple agents (uses `O_APPEND`)
+
+---
+
 **See also:** [Metadata & tags](../metadata/), [Kernel & analysis tools](../kernel/)
