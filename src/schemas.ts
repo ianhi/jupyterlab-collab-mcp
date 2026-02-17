@@ -1548,4 +1548,58 @@ export const toolSchemas = [
       required: ["path"],
     },
   },
+  // ================================================================
+  // Issue reporting tools
+  // ================================================================
+  {
+    name: "report_issue",
+    description:
+      "Submit a feedback report about a tool bug, hang, missing feature, or general observation. Reports are persisted to a JSONL file for later review. Use this when you encounter unexpected behavior, hangs, or want to log suggestions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"],
+          description: "Category of the report",
+        },
+        summary: {
+          type: "string",
+          description: "One-line description of the issue",
+        },
+        tool_name: {
+          type: "string",
+          description: "Which MCP tool was involved (e.g., 'get_kernel_variables')",
+        },
+        path: {
+          type: "string",
+          description: "Notebook path for context",
+        },
+        details: {
+          type: "string",
+          description: "Longer description, error messages, or reproduction steps",
+        },
+      },
+      required: ["category", "summary"],
+    },
+  },
+  {
+    name: "list_reports",
+    description:
+      "List previously submitted issue reports. Returns reports in reverse chronological order (most recent first). Optionally filter by category.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"],
+          description: "Filter reports by category",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of reports to return. Default: 20",
+        },
+      },
+    },
+  },
 ];
