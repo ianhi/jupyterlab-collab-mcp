@@ -1561,45 +1561,13 @@ export const toolSchemas = [
         category: {
           type: "string",
           enum: ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"],
-          description: "Category of the report",
         },
-        summary: {
-          type: "string",
-          description: "One-line description of the issue",
-        },
-        tool_name: {
-          type: "string",
-          description: "Which MCP tool was involved (e.g., 'get_kernel_variables')",
-        },
-        path: {
-          type: "string",
-          description: "Notebook path for context",
-        },
-        details: {
-          type: "string",
-          description: "Longer description, error messages, or reproduction steps",
-        },
+        summary: { type: "string", description: "One-line description" },
+        tool_name: { type: "string", description: "Which MCP tool was involved" },
+        path: { type: "string", description: "Notebook path" },
+        details: { type: "string", description: "Error messages or reproduction steps" },
       },
       required: ["category", "summary"],
-    },
-  },
-  {
-    name: "list_reports",
-    description:
-      "List previously submitted issue reports. Returns reports in reverse chronological order (most recent first). Optionally filter by category.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        category: {
-          type: "string",
-          enum: ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"],
-          description: "Filter reports by category",
-        },
-        limit: {
-          type: "number",
-          description: "Maximum number of reports to return. Default: 20",
-        },
-      },
     },
   },
 ];

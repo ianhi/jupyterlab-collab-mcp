@@ -2,7 +2,7 @@ import type { ToolResult } from "../handler-types.js";
 import * as Y from "yjs";
 import { homedir } from "os";
 import { join } from "path";
-import { appendFileSync, readFileSync, existsSync } from "fs";
+import { appendFileSync, readFileSync, writeFileSync, existsSync, statSync } from "fs";
 import {
   getCellId,
   resolveCellId,
@@ -42,10 +42,36 @@ import {
 } from "../cell-locks.js";
 
 const REPORTS_PATH = join(homedir(), ".jupyter-mcp-reports.jsonl");
+const REPORTS_MAX_BYTES = 1024 * 1024; // 1MB — rotate when exceeded
 const SESSION_ID = crypto.randomUUID();
 
 const VALID_CATEGORIES = ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"] as const;
 type ReportCategory = typeof VALID_CATEGORIES[number];
+
+/**
+ * Rotate the reports file if it exceeds REPORTS_MAX_BYTES.
+ * Keeps the most recent half of the file (by bytes) to avoid
+ * reading/parsing the entire file. Finds the next newline after
+ * the midpoint to avoid splitting a JSON line.
+ */
+function rotateReportsIfNeeded(): void {
+  try {
+    if (!existsSync(REPORTS_PATH)) return;
+    const stat = statSync(REPORTS_PATH);
+    if (stat.size <= REPORTS_MAX_BYTES) return;
+
+    const content = readFileSync(REPORTS_PATH, "utf-8");
+    // Keep the second half (most recent reports)
+    const midpoint = Math.floor(content.length / 2);
+    const nextNewline = content.indexOf("\n", midpoint);
+    if (nextNewline === -1) return; // single giant line, leave it
+    const trimmed = content.slice(nextNewline + 1);
+    writeFileSync(REPORTS_PATH, trimmed);
+  } catch {
+    // Non-critical — don't block report submission
+  }
+}
+
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "get_cell_history": async (args) => {
@@ -477,13 +503,26 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "report_issue": async (args) => {
-    const { category, summary, tool_name, path, details } = args as {
-      category: string;
-      summary: string;
-      tool_name?: string;
-      path?: string;
-      details?: string;
+    // Coerce all inputs to strings defensively — agents may pass unexpected types
+    const toString = (v: unknown, maxLen: number): string | undefined => {
+      if (v == null) return undefined;
+      const s = typeof v === "string" ? v : JSON.stringify(v);
+      return s.length > maxLen ? s.slice(0, maxLen) + "...[truncated]" : s;
     };
+
+    const category = toString(args.category, 50);
+    const summary = toString(args.summary, 500);
+    const tool_name = toString(args.tool_name, 100);
+    const path = toString(args.path, 300);
+    // Details can be longer (tracebacks, etc.) but cap to keep writes atomic (<4KB)
+    const details = toString(args.details, 2000);
+
+    if (!category || !summary) {
+      return {
+        content: [{ type: "text", text: "report_issue requires 'category' and 'summary'" }],
+        isError: true,
+      };
+    }
 
     if (!VALID_CATEGORIES.includes(category as ReportCategory)) {
       return {
@@ -502,62 +541,19 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     if (path) report.path = path;
     if (details) report.details = details;
 
-    appendFileSync(REPORTS_PATH, JSON.stringify(report) + "\n");
-
-    return {
-      content: [{ type: "text", text: `Report submitted: [${category}] ${summary}\nSaved to ${REPORTS_PATH}` }],
-    };
-  },
-
-  "list_reports": async (args) => {
-    const { category, limit = 20 } = args as {
-      category?: string;
-      limit?: number;
-    };
-
-    if (!existsSync(REPORTS_PATH)) {
+    try {
+      appendFileSync(REPORTS_PATH, JSON.stringify(report) + "\n");
+      rotateReportsIfNeeded();
+    } catch (err) {
       return {
-        content: [{ type: "text", text: "No reports yet." }],
+        content: [{ type: "text", text: `Failed to write report: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
       };
     }
 
-    const content = readFileSync(REPORTS_PATH, "utf-8");
-    const lines = content.split("\n").filter((l) => l.trim().length > 0);
-
-    let reports: Record<string, unknown>[] = [];
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line);
-        if (!category || parsed.category === category) {
-          reports.push(parsed);
-        }
-      } catch {
-        // Skip unparseable lines
-      }
-    }
-
-    // Reverse chronological order, apply limit
-    reports = reports.reverse().slice(0, limit);
-
-    if (reports.length === 0) {
-      const filterNote = category ? ` matching category '${category}'` : "";
-      return {
-        content: [{ type: "text", text: `No reports found${filterNote}.` }],
-      };
-    }
-
-    const formatted = reports.map((r, i) => {
-      let line = `${i + 1}. [${r.category}] ${r.summary}`;
-      if (r.tool_name) line += ` (tool: ${r.tool_name})`;
-      if (r.path) line += ` (path: ${r.path})`;
-      if (r.timestamp) line += `\n   ${r.timestamp}`;
-      if (r.details) line += `\n   ${r.details}`;
-      return line;
-    });
-
-    const filterNote = category ? ` (filtered: ${category})` : "";
     return {
-      content: [{ type: "text", text: `${reports.length} report(s)${filterNote}:\n\n${formatted.join("\n\n")}` }],
+      content: [{ type: "text", text: `Report submitted: [${category}] ${summary}` }],
     };
   },
+
 };
