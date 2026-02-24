@@ -15,16 +15,16 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 ```
 src/
 ├── index.ts        # Thin MCP server entry point (dispatches to handlers)
-├── handlers/       # All 55 tool handlers, organized by category
+├── handlers/       # All 56 tool handlers, organized by category
 │   ├── connection.ts   # connect_jupyter, list_files, list_notebooks, list_kernels, open/create/rename_notebook
 │   ├── cell-read.ts    # get_notebook_content, get_notebook_outline, search_notebook, replace_in_notebook
 │   ├── cell-write.ts   # insert_cell, update_cell, delete_cell(s), change_cell_type, copy/move_cells, batch ops
-│   ├── execute.ts      # execute_cell, execute_code, execute_range, insert/update_and_execute, clear_outputs, get_cell_outputs
+│   ├── execute.ts      # execute_cell, execute_code, execute_range, insert/update_and_execute, update_and_execute_range, clear_outputs, get_cell_outputs
 │   ├── metadata.ts     # get/set_cell_metadata, add/remove_cell_tags, find_cells_by_tag, notebook metadata
 │   ├── kernel-lsp.ts   # kernel status/variables/interrupt/restart, diagnostics, hover_info, rename_symbol, diff/rename_notebook
 │   └── collab.ts       # get_user_focus, cell history, notebook changes, recover_cell, snapshots, locks
 ├── connection.ts   # JupyterLab connection state, config, session management, kernel execution
-├── schemas.ts      # Tool schema definitions (all 55 tools)
+├── schemas.ts      # Tool schema definitions (all 56 tools)
 ├── tool-helpers.ts # Shared handler patterns (getNotebookCells, resolveIndexParam, etc.)
 ├── helpers.ts      # Shared utilities (cell extraction, diffing, output formatting)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb without JupyterLab)
@@ -55,6 +55,7 @@ src/
 | `batch_update_cells` | Update multiple cells atomically |
 | `batch_insert_cells` | Insert multiple cells at once |
 | `update_and_execute` | Update a cell and run it in one operation |
+| `update_and_execute_range` | Update cells and execute a range in one operation |
 | `change_cell_type` | Change cell type (code ↔ markdown) |
 | `delete_cell` | Delete a cell |
 | `delete_cells` | Delete multiple cells at once |
