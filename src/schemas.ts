@@ -875,6 +875,80 @@ export const toolSchemas = [
     },
   },
   {
+    name: "update_and_execute_range",
+    description:
+      "Update one or more cells and then execute a range of cells. Requires JupyterLab connection. Combines batch_update_cells + execute_range in one operation. Useful when you modify a function definition and need to re-execute cells that depend on it. Updates are applied atomically, then cells are executed in order.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook path",
+        },
+        updates: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              index: { type: "number", description: "Cell index to update" },
+              cell_id: {
+                type: "string",
+                description:
+                  "Cell ID to update (alternative to index). Use the ID shown in get_notebook_content output.",
+              },
+              source: { type: "string", description: "New source code" },
+            },
+            required: ["source"],
+          },
+          description:
+            "Array of cell updates to apply before executing. Each needs index or cell_id plus source.",
+        },
+        execute_start_index: {
+          type: "number",
+          description:
+            "First cell index to execute. Default: smallest index among updated cells.",
+        },
+        execute_end_index: {
+          type: "number",
+          description:
+            "Last cell index to execute (inclusive). Default: last cell in notebook.",
+        },
+        execute_cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Cell IDs to execute in order (alternative to execute_start_index/execute_end_index).",
+        },
+        force: {
+          type: "boolean",
+          description:
+            "Force update even if a human is editing target cells. Default: false",
+        },
+        timeout: {
+          type: "number",
+          description:
+            "Timeout per cell in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
+        },
+        max_images: {
+          type: "number",
+          description:
+            "Maximum number of images to return. When exceeded, shows last N images. Default: all images.",
+        },
+        include_images: {
+          type: "boolean",
+          description:
+            "Whether to include images in the response. Set to false for text-only output. Default: true",
+        },
+        client_name: {
+          type: "string",
+          description:
+            "Optional agent/client name for change attribution and lock owner matching (e.g., 'model-agent'). Default: 'claude-code'",
+        },
+      },
+      required: ["path", "updates"],
+    },
+  },
+  {
     name: "clear_outputs",
     description:
       "Clear execution outputs from cells. Useful before committing notebooks.",

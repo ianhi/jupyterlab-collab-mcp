@@ -373,6 +373,240 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
   },
 
+  "update_and_execute_range": async (args) => {
+    const {
+      path,
+      updates,
+      execute_start_index,
+      execute_end_index,
+      execute_cell_ids,
+      force = false,
+      timeout,
+      max_images,
+      include_images,
+      client_name,
+    } = args as {
+      path: string;
+      updates: { index?: number; cell_id?: string; source: string }[];
+      execute_start_index?: number;
+      execute_end_index?: number;
+      execute_cell_ids?: string[];
+      force?: boolean;
+      timeout?: number;
+      max_images?: number;
+      include_images?: boolean;
+      client_name?: string;
+    };
+    const clientId = client_name || "claude-code";
+
+    if (!updates || updates.length === 0) {
+      throw new Error("At least one update is required.");
+    }
+
+    const sessions = await listNotebookSessions();
+    const session = sessions.find((s) => s.path === path);
+
+    if (!session?.kernelId) {
+      throw new Error(
+        `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
+      );
+    }
+
+    const { doc, provider } = await connectToNotebook(path, session.kernelId);
+    const cells = doc.getArray("cells");
+
+    // --- Phase 1: Resolve update indices and validate ---
+    const resolvedUpdates: { index: number; source: string }[] = [];
+    for (const update of updates) {
+      let resolvedIndex = update.index;
+      if (update.cell_id !== undefined) {
+        if (update.index !== undefined)
+          throw new Error("Specify either 'index' or 'cell_id' per update, not both.");
+        resolvedIndex = resolveCellId(cells, update.cell_id);
+      }
+      if (resolvedIndex === undefined) {
+        throw new Error("Each update requires 'index' or 'cell_id'.");
+      }
+      if (resolvedIndex < 0 || resolvedIndex >= cells.length) {
+        throw new Error(
+          `Invalid cell index ${resolvedIndex}. Notebook has ${cells.length} cells.`
+        );
+      }
+      resolvedUpdates.push({ index: resolvedIndex, source: update.source });
+    }
+
+    // --- Phase 2: Check human focus and locks for cells being updated ---
+    for (const update of resolvedUpdates) {
+      if (!force) {
+        const focus = checkHumanFocus(provider, doc, update.index);
+        if (focus.blocked) {
+          const cellIdStr = truncatedCellId(cells.get(update.index) as any);
+          throw new Error(
+            `Cannot modify cell ${update.index}${cellIdStr ? ` (${cellIdStr})` : ""} — user "${focus.user}" is currently editing it. Use force=true to override.`
+          );
+        }
+      }
+
+      const cell = cells.get(update.index) as Y.Map<any>;
+      const fullCellId = getCellId(cell) || "";
+      if (fullCellId) {
+        const lock = checkLock(path, fullCellId, clientId, doc);
+        if (lock && !force) {
+          const cellIdStr = truncatedCellId(cell);
+          throw new Error(
+            `Cell ${update.index}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires in ${formatTimeRemaining(Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000))}). Use force=true to override.`
+          );
+        }
+      }
+    }
+
+    // --- Phase 3: Apply all updates atomically ---
+    const diffs: string[] = [];
+    const changeRecords: {
+      cellId: string;
+      cellIdShort: string;
+      index: number;
+      oldSource: string;
+      newSource: string;
+    }[] = [];
+
+    doc.transact(() => {
+      for (const update of resolvedUpdates) {
+        const cell = cells.get(update.index) as Y.Map<any>;
+        const oldSource = extractSource(cell);
+
+        if (cell instanceof Y.Map) {
+          const sourceField = cell.get("source");
+          if (sourceField instanceof Y.Text) {
+            sourceField.delete(0, sourceField.length);
+            sourceField.insert(0, update.source);
+          } else {
+            cell.set("source", new Y.Text(update.source));
+          }
+        }
+
+        changeRecords.push({
+          cellId: getCellId(cell) || "",
+          cellIdShort: truncatedCellId(cell) || "",
+          index: update.index,
+          oldSource,
+          newSource: update.source,
+        });
+
+        const diff = generateUnifiedDiff(
+          oldSource,
+          update.source,
+          `${path}:cell[${update.index}]`
+        );
+        if (diff !== "(no changes)") {
+          diffs.push(`Cell ${update.index}:\n${truncateDiff(diff)}`);
+        }
+      }
+    });
+
+    // Record changes after transaction
+    for (const rec of changeRecords) {
+      recordChange(
+        path,
+        {
+          operation: "update",
+          cellId: rec.cellId,
+          cellIdShort: rec.cellIdShort,
+          cellIndex: rec.index,
+          oldSource: rec.oldSource,
+          newSource: rec.newSource,
+          client: clientId,
+        },
+        doc
+      );
+    }
+
+    // --- Phase 4: Resolve execution range ---
+    let indicesToExecute: number[];
+    let rangeLabel: string;
+
+    if (execute_cell_ids && execute_cell_ids.length > 0) {
+      indicesToExecute = resolveCellIds(cells, execute_cell_ids);
+      rangeLabel = `${indicesToExecute.length} cells by ID`;
+    } else {
+      const updatedIndices = resolvedUpdates.map((u) => u.index);
+      const startIdx =
+        execute_start_index ?? Math.min(...updatedIndices);
+      const endIdx = execute_end_index ?? cells.length - 1;
+      if (startIdx < 0 || endIdx >= cells.length || startIdx > endIdx) {
+        throw new Error(
+          `Invalid execution range [${startIdx}, ${endIdx}]. Notebook has ${cells.length} cells.`
+        );
+      }
+      indicesToExecute = [];
+      for (let i = startIdx; i <= endIdx; i++) indicesToExecute.push(i);
+      rangeLabel = `cells ${startIdx}-${endIdx}`;
+    }
+
+    // --- Phase 5: Execute cells in sequence ---
+    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+    const execResults: {
+      index: number;
+      cellId?: string;
+      status: string;
+      output?: string;
+    }[] = [];
+
+    for (const i of indicesToExecute) {
+      const cell = cells.get(i) as Y.Map<any>;
+      const type = getCellType(cell);
+      const cid = truncatedCellId(cell);
+
+      if (type !== "code") {
+        execResults.push({ index: i, cellId: cid, status: "skipped (not code)" });
+        continue;
+      }
+
+      const source = extractSource(cell);
+      if (!source.trim()) {
+        execResults.push({ index: i, cellId: cid, status: "skipped (empty)" });
+        continue;
+      }
+
+      try {
+        const result = await executeCode(session.kernelId, source, timeoutMs);
+        updateCellOutputs(cell, result);
+        execResults.push({
+          index: i,
+          cellId: cid,
+          status: result.status,
+          output: result.text
+            ? result.text.slice(0, 100) + (result.text.length > 100 ? "..." : "")
+            : undefined,
+        });
+      } catch (err: any) {
+        execResults.push({ index: i, cellId: cid, status: `error: ${err.message}` });
+      }
+    }
+
+    // --- Phase 6: Build response ---
+    const successCount = execResults.filter((r) => r.status === "ok").length;
+    const errorCount = execResults.filter(
+      (r) => r.status === "error" || r.status.startsWith("error:")
+    ).length;
+
+    const updateSummary =
+      diffs.length > 0
+        ? `Updated ${resolvedUpdates.length} cell(s):\n${diffs.join("\n\n")}`
+        : `Updated ${resolvedUpdates.length} cell(s) (no source changes)`;
+
+    const execSummary = `Executed ${rangeLabel}: ${successCount} succeeded, ${errorCount} failed`;
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${updateSummary}\n\n${execSummary}\n\n${JSON.stringify(execResults, null, 2)}`,
+        },
+      ],
+    };
+  },
+
   "clear_outputs": async (args) => {
     const { path, index, cell_id, force = false } = args as {
       path: string;
