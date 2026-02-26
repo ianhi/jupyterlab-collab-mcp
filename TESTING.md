@@ -3,7 +3,7 @@
 When testing multi-agent collaboration on notebooks, use a team of 4+ agents working simultaneously. The test should exercise:
 
 1. **Cell ID stability**: Agents use `cell_id` (not indices) for all operations. One agent inserting cells mid-notebook must not break another agent's references.
-2. **Cross-notebook operations**: Agents work across multiple notebooks using `copy_cells` and `move_cells`. E.g., one agent builds a data pipeline notebook while another builds a visualization notebook, and they share cells between them.
+2. **Cross-notebook operations**: Agents work across multiple notebooks using `copy_cells` (and `copy_cells` with `delete_source=true` for moves). E.g., one agent builds a data pipeline notebook while another builds a visualization notebook, and they share cells between them.
 3. **Execute range**: Agents use `execute_range` to run multi-cell sections, not just single cells.
 4. **Multi-plot cells**: Include cells that produce multiple matplotlib figures (subplots, figure galleries) to stress-test `max_images`/`include_images` context management. Agents should use `max_images=2` or `include_images=false` for plot-heavy cells to conserve context.
 5. **Concurrent inserts**: Multiple agents inserting cells in the same notebook simultaneously — cell IDs prevent index collisions.
@@ -16,7 +16,7 @@ The team lead acts as a **scientist/observer**, not a manager:
 - **Observe**: Monitor the change log and notebook state for high-level issues
 - **Don't micromanage**: Let agents coordinate organically through messaging and kernel variable polling. Don't direct traffic, assign work to idle agents, or prevent conflicts — conflicts are valuable for stress testing
 - **Intervene only for systemic issues**: e.g., a shared kernel crash, a tool bug blocking all agents, or a fundamental misunderstanding of the task
-- **Avoid rigid dependency graphs**: Use `blockedBy` sparingly or not at all. Let agents discover data availability themselves via `get_kernel_variables` and communicate through messages. Organic coordination surfaces real collaboration pain points that artificial sequencing hides.
+- **Avoid rigid dependency graphs**: Use `blockedBy` sparingly or not at all. Let agents discover data availability themselves via `kernel_variables` and communicate through messages. Organic coordination surfaces real collaboration pain points that artificial sequencing hides.
 
 ## Test Phases
 

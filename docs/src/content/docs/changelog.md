@@ -5,6 +5,29 @@ description: Version history for jupyterlab-collab-mcp.
 
 All notable changes to the jupyterlab-collab-mcp.
 
+## [Unreleased]
+
+### Changed
+- **Consolidated 55 tools down to 41** — reduced schema token overhead by merging related tools:
+  - `insert_and_execute`/`update_and_execute` → `insert_cell(execute=true)`/`update_cell(execute=true)`
+  - `delete_cells` → `delete_cell` (now accepts `indices`, `cell_ids`, `start_index`/`end_index`)
+  - `move_cells` → `copy_cells(delete_source=true)`
+  - `get/set_cell_metadata` → `cell_metadata`, `get/set_notebook_metadata` → `notebook_metadata`
+  - `add/remove_cell_tags` → `cell_tags(action="add"/"remove")`
+  - `lock/unlock/list_locks` → `cell_locks(action="acquire"/"release"/"list")`
+  - 4 snapshot tools → `snapshot(action="save"/"restore"/"list"/"diff")`
+  - 3 kernel tools → `kernel(action="status"/"interrupt"/"restart")`
+  - `get_kernel_variables`/`inspect_variable` → `kernel_variables`
+
+### Added
+- `filter_output` tool — post-process cached execution results with grep, head, tail
+- `show_diff` parameter on `update_cell`
+- Execution result caching
+
+### Fixed
+- Batch delete now records change history for `recover_cell`
+- Cross-notebook `copy_cells` clarifies destination cell IDs
+
 ## [0.8.0] - 2025-02-11
 
 ### Added

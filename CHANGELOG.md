@@ -2,6 +2,32 @@
 
 All notable changes to the jupyterlab-collab-mcp.
 
+## [Unreleased]
+
+### Changed
+- **Consolidated 55 tools down to 41** — reduced schema token overhead by merging related tools:
+  - `insert_and_execute`/`update_and_execute` → `insert_cell(execute=true)`/`update_cell(execute=true)`
+  - `delete_cells` → `delete_cell` (now accepts `indices`, `cell_ids`, `start_index`/`end_index`)
+  - `move_cells` → `copy_cells(delete_source=true)`
+  - `get_cell_metadata`/`set_cell_metadata` → `cell_metadata` (omit `metadata` to GET, provide to SET)
+  - `get_notebook_metadata`/`set_notebook_metadata` → `notebook_metadata` (same pattern)
+  - `add_cell_tags`/`remove_cell_tags` → `cell_tags(action="add"/"remove")`
+  - `lock_cells`/`unlock_cells`/`list_locks` → `cell_locks(action="acquire"/"release"/"list")`
+  - `snapshot_notebook`/`restore_snapshot`/`list_snapshots`/`diff_snapshot` → `snapshot(action="save"/"restore"/"list"/"diff")`
+  - `get_kernel_status`/`interrupt_kernel`/`restart_kernel` → `kernel(action="status"/"interrupt"/"restart")`
+  - `get_kernel_variables`/`inspect_variable` → `kernel_variables` (provide `names` to inspect)
+- Removed `insertCell` parameter from `execute_code` — use `insert_cell(execute=true)` instead
+- Removed `max_output_lines`, `output_tail`, `output_grep` from execute tools — use `filter_output` instead
+
+### Added
+- `filter_output` tool — post-process cached execution results with grep, head, tail, max_lines
+- `show_diff` parameter on `update_cell` for inline diff display
+- Execution result caching for `filter_output` access to full unfiltered output
+
+### Fixed
+- Batch delete (`delete_cell` with indices/range) now records change history for `recover_cell`
+- Cross-notebook `copy_cells` response clarifies that returned IDs are new destination cell IDs
+
 ## [0.8.0] - 2025-02-11
 
 ### Added

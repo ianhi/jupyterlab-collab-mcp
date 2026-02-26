@@ -15,7 +15,7 @@ This document compares our implementation with the existing [datalayer/jupyter-m
 | Multi-notebook | Implicit (by path) | Explicit `use_notebook`/`unuse_notebook` |
 | File browser | `list_files` | `list_files` |
 | Open/create notebooks | `open_notebook`, `create_notebook` | Similar |
-| Kernel management | No | `list_kernels`, `restart_notebook` |
+| Kernel management | `kernel` (status/interrupt/restart), `kernel_variables` | `list_kernels`, `restart_notebook` |
 | Output filtering | `output_format`, `cell_type` | `response_format` (brief/detailed) |
 | Streaming execution | No | Yes (`stream` flag) |
 | JupyterLab commands | No | `run-all-cells`, `get-selected-cell` |
@@ -86,11 +86,7 @@ They have `response_format` (brief/detailed) but less granular control.
 - Better for team/production deployments
 - Survives client disconnects
 
-### 2. More Kernel Tools
-- `list_kernels` - See available kernels
-- `restart_notebook` - Restart kernel without reconnecting
-
-### 3. Streaming Execution
+### 2. Streaming Execution
 ```python
 execute_cell(cell_index, stream=True, progress_interval=1.0)
 ```
