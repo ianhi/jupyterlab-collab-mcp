@@ -38,6 +38,7 @@ export default defineConfig({
         {
           label: "For Agents",
           items: [
+            { label: "Context Efficiency", slug: "agents/context-efficiency" },
             { label: "Best Practices", slug: "agents/best-practices" },
             { label: "Multi-Agent Workflows", slug: "agents/multi-agent" },
           ],
