@@ -624,6 +624,18 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
               throw new Error(`Invalid cell index ${idx}. Notebook has ${cells.length} cells.`);
             }
           }
+          // Record change history before deleting (iterate in reverse to match delete order)
+          for (const idx of sortedIndices) {
+            const cell = cells[idx];
+            recordChange(path, {
+              operation: "delete",
+              cellId: getCellId(cell) || "",
+              cellIdShort: truncatedCellId(cell) || "",
+              cellIndex: idx,
+              oldSource: extractSource(cell),
+              client: clientId,
+            });
+          }
           for (const idx of sortedIndices) {
             cells.splice(idx, 1);
           }
@@ -642,6 +654,18 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
 
         const count = end_index - start_index + 1;
+        // Record change history before deleting (reverse order for consistent indexing)
+        for (let idx = end_index; idx >= start_index; idx--) {
+          const cell = cells[idx];
+          recordChange(path, {
+            operation: "delete",
+            cellId: getCellId(cell) || "",
+            cellIdShort: truncatedCellId(cell) || "",
+            cellIndex: idx,
+            oldSource: extractSource(cell),
+            client: clientId,
+          });
+        }
         cells.splice(start_index, count);
         await writeNotebook(resolved, notebook);
 
@@ -667,6 +691,18 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           if (idx < 0 || idx >= cells.length) {
             throw new Error(`Invalid cell index ${idx}. Notebook has ${cells.length} cells.`);
           }
+        }
+        // Record change history before deleting
+        for (const idx of sortedIndices) {
+          const cell = cells.get(idx) as Y.Map<any>;
+          recordChange(path, {
+            operation: "delete",
+            cellId: getCellId(cell) || "",
+            cellIdShort: truncatedCellId(cell) || "",
+            cellIndex: idx,
+            oldSource: extractSource(cell),
+            client: clientId,
+          }, doc);
         }
         for (const idx of sortedIndices) {
           cells.delete(idx, 1);
@@ -694,6 +730,18 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       }
 
       const count = end_index - start_index + 1;
+      // Record change history before deleting
+      for (let idx = end_index; idx >= start_index; idx--) {
+        const cell = cells.get(idx) as Y.Map<any>;
+        recordChange(path, {
+          operation: "delete",
+          cellId: getCellId(cell) || "",
+          cellIdShort: truncatedCellId(cell) || "",
+          cellIndex: idx,
+          oldSource: extractSource(cell),
+          client: clientId,
+        }, doc);
+      }
       cells.delete(start_index, count);
 
       return {
@@ -1063,8 +1111,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const destLabel = delete_source && sameNotebook
         ? `index ${adjustedInsertAt} in ${source_path}`
         : `${dest_path} at index ${adjustedInsertAt}`;
+      const idNote = !sameNotebook ? `\n\nNote: Cell IDs above are NEW destination IDs in ${dest_path} (source IDs are no longer valid).` : "";
       return {
-        content: [{ type: "text", text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}` }],
+        content: [{ type: "text", text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}${idNote}` }],
       };
     }
 
@@ -1193,11 +1242,12 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const destLabel = delete_source && sameNotebook
       ? `index ${adjustedInsertAt} in ${source_path}`
       : `${dest_path} at index ${adjustedInsertAt}`;
+    const idNote = !sameNotebook ? `\n\nNote: Cell IDs above are NEW destination IDs in ${dest_path} (source IDs are no longer valid).` : "";
     return {
       content: [
         {
           type: "text",
-          text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}`,
+          text: `${operationPast} ${copiedCells.length} cell(s) from ${source_path} ${rangeLabel} to ${destLabel}:\n${cellSummaries.join("\n")}${idNote}`,
         },
       ],
     };
