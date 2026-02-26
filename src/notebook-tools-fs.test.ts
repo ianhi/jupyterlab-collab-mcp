@@ -366,7 +366,7 @@ describe("metadata ops (filesystem)", () => {
     expect(reRead.cells[4].metadata.tags).not.toContain("hide-input");
   });
 
-  it("find_cells_by_tag: finds cells with specific tag", async () => {
+  it("cell_tags(action=find): finds cells with specific tag", async () => {
     const nb = await readNotebook(join(FIXTURES, "simple.ipynb"));
 
     const matches: number[] = [];
@@ -380,7 +380,7 @@ describe("metadata ops (filesystem)", () => {
     expect(matches).toEqual([2, 4]); // cells with "parameters" tag
   });
 
-  it("find_cells_by_tag: match_all requires all tags", async () => {
+  it("cell_tags(action=find): match_all requires all tags", async () => {
     const nb = await readNotebook(join(FIXTURES, "simple.ipynb"));
 
     const tags = ["hide-input", "parameters"];

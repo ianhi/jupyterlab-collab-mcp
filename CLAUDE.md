@@ -15,16 +15,16 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 ```
 src/
 ├── index.ts        # MCP server entry point
-├── handlers/       # 41 tool handlers by category
+├── handlers/       # 39 tool handlers by category
 │   ├── connection.ts   # connect, list_files/notebooks/kernels, open/create/rename
 │   ├── cell-read.ts    # get_content/outline, search, replace, diff
 │   ├── cell-write.ts   # insert/update/delete/copy cells, batch ops
-│   ├── execute.ts      # execute_cell/code/range, filter_output, outputs
-│   ├── metadata.ts     # cell_metadata, notebook_metadata, cell_tags
+│   ├── execute.ts      # execute_cell/code, filter_output, outputs
+│   ├── metadata.ts     # cell_metadata, notebook_metadata, cell_tags (incl. find)
 │   ├── kernel-lsp.ts   # kernel (status/interrupt/restart), kernel_variables, diagnostics, hover, rename
 │   └── collab.ts       # focus, history, changes, recover, snapshot, cell_locks
 ├── connection.ts   # Jupyter connection state, session management, kernel execution
-├── schemas.ts      # All 41 tool schema definitions
+├── schemas.ts      # All 39 tool schema definitions
 ├── helpers.ts      # Utilities (cell extraction, diffing, output formatting, ANSI stripping)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb)
 ├── rename.ts       # Scope-aware Python rename via jedi

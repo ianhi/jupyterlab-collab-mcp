@@ -147,16 +147,102 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "cell_tags": async (args) => {
-    const { path, action, index, end_index, indices, cell_ids, tags } = args as {
+    const { path, action, index, end_index, indices, cell_ids, tags, match_all = false, include_preview = false } = args as {
       path: string;
-      action: "add" | "remove";
+      action: "add" | "remove" | "find";
       index?: number;
       end_index?: number;
       indices?: number[];
       cell_ids?: string[];
       tags: string[];
+      match_all?: boolean;
+      include_preview?: boolean;
     };
 
+    // Handle "find" action
+    if (action === "find") {
+      if (!isJupyterConnected()) {
+        const resolved = resolveNotebookPath(path);
+        const notebook = await readNotebook(resolved);
+
+        const matches: any[] = [];
+        for (let i = 0; i < notebook.cells.length; i++) {
+          const cell = notebook.cells[i];
+          const type = getCellType(cell);
+          const cellTags: string[] = Array.isArray(cell.metadata?.tags) ? cell.metadata.tags : [];
+          if (cellTags.length === 0) continue;
+
+          const hasMatch = match_all
+            ? tags.every((t) => cellTags.includes(t))
+            : tags.some((t) => cellTags.includes(t));
+
+          if (hasMatch) {
+            const result: any = { index: i, id: truncatedCellId(cell), type, tags: cellTags };
+            if (include_preview) result.preview = getCodePreview(extractSource(cell));
+            matches.push(result);
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}` }],
+        };
+      }
+
+      const sessions = await listNotebookSessions();
+      const session = sessions.find((s) => s.path === path);
+
+      const { doc } = await connectToNotebook(path, session?.kernelId);
+      const cells = doc.getArray("cells");
+
+      const matches: any[] = [];
+
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells.get(i) as Y.Map<any>;
+        const type = getCellType(cell);
+        const cellMetadata = cell.get("metadata");
+
+        let cellTags: string[] = [];
+        if (cellMetadata instanceof Y.Map) {
+          const tagsValue = cellMetadata.get("tags");
+          if (tagsValue instanceof Y.Array) {
+            cellTags = tagsValue.toJSON() as string[];
+          } else if (Array.isArray(tagsValue)) {
+            cellTags = tagsValue;
+          }
+        }
+
+        if (cellTags.length === 0) continue;
+
+        const hasMatch = match_all
+          ? tags.every((t) => cellTags.includes(t))
+          : tags.some((t) => cellTags.includes(t));
+
+        if (hasMatch) {
+          const result: any = {
+            index: i,
+            id: truncatedCellId(cell),
+            type,
+            tags: cellTags,
+          };
+          if (include_preview) {
+            const source = extractSource(cell);
+            result.preview = getCodePreview(source);
+          }
+          matches.push(result);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}`,
+          },
+        ],
+      };
+    }
+
+    // Handle "add" and "remove" actions
     const actionPast = action === "add" ? "Added" : "Removed";
     const actionPrep = action === "add" ? "to" : "from";
 
@@ -270,95 +356,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         {
           type: "text",
           text: `${actionPast} tags [${tags.join(", ")}] ${actionPrep} ${resolved.description}`,
-        },
-      ],
-    };
-  },
-
-  "find_cells_by_tag": async (args) => {
-    const { path, tags, match_all = false, include_preview = false } = args as {
-      path: string;
-      tags: string[];
-      match_all?: boolean;
-      include_preview?: boolean;
-    };
-
-    if (!isJupyterConnected()) {
-      const resolved = resolveNotebookPath(path);
-      const notebook = await readNotebook(resolved);
-
-      const matches: any[] = [];
-      for (let i = 0; i < notebook.cells.length; i++) {
-        const cell = notebook.cells[i];
-        const type = getCellType(cell);
-        const cellTags: string[] = Array.isArray(cell.metadata?.tags) ? cell.metadata.tags : [];
-        if (cellTags.length === 0) continue;
-
-        const hasMatch = match_all
-          ? tags.every((t) => cellTags.includes(t))
-          : tags.some((t) => cellTags.includes(t));
-
-        if (hasMatch) {
-          const result: any = { index: i, id: truncatedCellId(cell), type, tags: cellTags };
-          if (include_preview) result.preview = getCodePreview(extractSource(cell));
-          matches.push(result);
-        }
-      }
-
-      return {
-        content: [{ type: "text", text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}` }],
-      };
-    }
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    const { doc } = await connectToNotebook(path, session?.kernelId);
-    const cells = doc.getArray("cells");
-
-    const matches: any[] = [];
-
-    for (let i = 0; i < cells.length; i++) {
-      const cell = cells.get(i) as Y.Map<any>;
-      const type = getCellType(cell);
-      const cellMetadata = cell.get("metadata");
-
-      let cellTags: string[] = [];
-      if (cellMetadata instanceof Y.Map) {
-        const tagsValue = cellMetadata.get("tags");
-        if (tagsValue instanceof Y.Array) {
-          cellTags = tagsValue.toJSON() as string[];
-        } else if (Array.isArray(tagsValue)) {
-          cellTags = tagsValue;
-        }
-      }
-
-      if (cellTags.length === 0) continue;
-
-      const hasMatch = match_all
-        ? tags.every((t) => cellTags.includes(t))
-        : tags.some((t) => cellTags.includes(t));
-
-      if (hasMatch) {
-        const result: any = {
-          index: i,
-          id: truncatedCellId(cell),
-          type,
-          tags: cellTags,
-        };
-        if (include_preview) {
-          const source = extractSource(cell);
-          result.preview = getCodePreview(source);
-        }
-        matches.push(result);
-      }
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Found ${matches.length} cells with tag(s) [${tags.join(", ")}]${match_all ? " (match all)" : ""}:\n\n${JSON.stringify(matches, null, 2)}`,
         },
       ],
     };

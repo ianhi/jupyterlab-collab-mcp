@@ -4,7 +4,7 @@ When testing multi-agent collaboration on notebooks, use a team of 4+ agents wor
 
 1. **Cell ID stability**: Agents use `cell_id` (not indices) for all operations. One agent inserting cells mid-notebook must not break another agent's references.
 2. **Cross-notebook operations**: Agents work across multiple notebooks using `copy_cells` (and `copy_cells` with `delete_source=true` for moves). E.g., one agent builds a data pipeline notebook while another builds a visualization notebook, and they share cells between them.
-3. **Execute range**: Agents use `execute_range` to run multi-cell sections, not just single cells.
+3. **Execute range**: Agents use `execute_cell` with `end_index` or `cell_ids` to run multi-cell sections, not just single cells.
 4. **Multi-plot cells**: Include cells that produce multiple matplotlib figures (subplots, figure galleries) to stress-test `max_images`/`include_images` context management. Agents should use `max_images=2` or `include_images=false` for plot-heavy cells to conserve context.
 5. **Concurrent inserts**: Multiple agents inserting cells in the same notebook simultaneously — cell IDs prevent index collisions.
 6. **Human-in-the-loop**: Human edits cells while agents work — agents should see focus-blocked errors and retry on different cells.

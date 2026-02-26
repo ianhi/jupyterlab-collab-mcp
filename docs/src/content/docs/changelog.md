@@ -8,12 +8,14 @@ All notable changes to the jupyterlab-collab-mcp.
 ## [Unreleased]
 
 ### Changed
-- **Consolidated 55 tools down to 41** — reduced schema token overhead by merging related tools:
+- **Consolidated 55 tools down to 39** — reduced schema token overhead by merging related tools:
   - `insert_and_execute`/`update_and_execute` → `insert_cell(execute=true)`/`update_cell(execute=true)`
   - `delete_cells` → `delete_cell` (now accepts `indices`, `cell_ids`, `start_index`/`end_index`)
   - `move_cells` → `copy_cells(delete_source=true)`
   - `get/set_cell_metadata` → `cell_metadata`, `get/set_notebook_metadata` → `notebook_metadata`
   - `add/remove_cell_tags` → `cell_tags(action="add"/"remove")`
+  - `find_cells_by_tag` → `cell_tags(action="find")`
+  - `execute_range` → `execute_cell` (use `end_index` or `cell_ids` for range execution)
   - `lock/unlock/list_locks` → `cell_locks(action="acquire"/"release"/"list")`
   - 4 snapshot tools → `snapshot(action="save"/"restore"/"list"/"diff")`
   - 3 kernel tools → `kernel(action="status"/"interrupt"/"restart")`
@@ -83,7 +85,7 @@ All notable changes to the jupyterlab-collab-mcp.
   - `get_cell_history` — view change log for a specific cell
   - `get_notebook_changes` — poll for changes since a version number
   - `recover_cell` — re-insert a deleted cell from change history
-- `cell_ids` parameter added to `execute_range`, `copy_cells`, `move_cells` for stable addressing
+- `cell_ids` parameter added to `execute_cell`, `copy_cells`, `move_cells` for stable addressing
 - `dest_cell_id` parameter added to `copy_cells`, `move_cells` for position by cell ID
 
 ## [0.3.0] - 2025-02-09

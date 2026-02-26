@@ -5,22 +5,25 @@ description: How the MCP server minimizes token usage, and how to control output
 
 The MCP server is designed to be **stingy by default** — responses are compact, outputs are truncated, and verbose diffs are omitted. This page documents the full token cost picture and all context-related controls.
 
-## Schema cost: ~8.6k tokens for 41 tools
+## Schema cost: ~6k tokens for 39 tools
 
 Every MCP tool has a JSON schema (name, description, parameters) that the LLM must see to know what tools are available. Here's the breakdown:
 
 | Category | Tools | Schema tokens |
 |----------|-------|--------------|
-| Connection | 7 | ~830 |
-| Reading | 5 | ~1,260 |
-| Editing | 7 | ~2,070 |
-| Execution | 6 | ~1,500 |
-| Metadata & Tags | 4 | ~740 |
-| Kernel & Analysis | 5 | ~1,040 |
-| Collaboration | 7 | ~1,180 |
-| **Total** | **41** | **~8,620** |
+| Connection | 7 | ~630 |
+| Reading | 5 | ~950 |
+| Editing | 7 | ~1,550 |
+| Execution | 4 | ~1,030 |
+| Metadata & Tags | 3 | ~560 |
+| Kernel & Analysis | 5 | ~790 |
+| Collaboration | 7 | ~910 |
+| Feedback | 1 | ~100 |
+| **Total** | **39** | **~6,020** |
 
-For comparison, a typical Claude conversation has a 200k token context window. The full 41-tool schema is ~4.3% of that.
+This is down from ~12.2k tokens at 55 tools — a **50% reduction** through tool consolidation and description trimming, with no loss of functionality.
+
+For comparison, a typical Claude conversation has a 200k token context window. The full 39-tool schema is ~3% of that.
 
 ### Claude Code lazy-loads MCP tools
 
@@ -28,9 +31,9 @@ Claude Code uses **deferred tool loading** — MCP tool schemas are not injected
 
 - **Zero schema cost** in conversations that don't use notebook tools
 - **Partial cost** when only a few tools are needed (e.g., just `execute_cell` and `get_notebook_content`)
-- **Full ~8.6k cost** only when the agent loads all 41 tools in a single session
+- **Full ~6k cost** only when the agent loads all 39 tools in a single session
 
-This is why we consolidated from 55 to 41 tools — fewer schemas means less overhead when tools are loaded, and the consolidation preserved all functionality.
+This is why we consolidated from 55 to 39 tools — fewer schemas means less overhead when tools are loaded, and the consolidation preserved all functionality.
 
 ### Most expensive tool schemas
 
@@ -38,13 +41,13 @@ The largest individual schemas (these have the most parameters):
 
 | Tool | Tokens | Why |
 |------|--------|-----|
-| `get_notebook_content` | ~420 | Many filtering options (cell_type, indices, cell_ids, output controls) |
-| `kernel_variables` | ~390 | Merged list + inspect modes with detail/filter options |
-| `update_cell` | ~380 | Supports execute, show_diff, cell selection, lock override |
-| `insert_cell` | ~360 | Supports execute, cell positioning, metadata |
-| `delete_cell` | ~350 | Single + batch modes (indices, cell_ids, range) |
+| `get_notebook_content` | ~300 | Many filtering options (cell_type, indices, cell_ids, output controls) |
+| `kernel_variables` | ~280 | Merged list + inspect modes with detail/filter options |
+| `execute_cell` | ~300 | Single + range + cell_ids execution modes |
+| `delete_cell` | ~240 | Single + batch modes (indices, cell_ids, range) |
+| `update_cell` | ~240 | Supports execute, show_diff, cell selection |
 
-The cheapest tools are under 100 tokens each: `list_files` (~70), `list_kernels` (~73), `rename_notebook` (~93).
+The cheapest tools are under 70 tokens each: `list_files`, `list_kernels`, `rename_notebook`, `kernel`.
 
 ## Response token efficiency
 
@@ -58,7 +61,7 @@ Beyond schema costs, the server minimizes tokens in tool responses:
 
 ### Output filtering
 
-Use the `filter_output` tool to post-process cached execution output from `execute_cell`, `execute_code`, `execute_range`, or `get_cell_outputs`. This avoids re-executing code just to see filtered output.
+Use the `filter_output` tool to post-process cached execution output from `execute_cell`, `execute_code`, or `get_cell_outputs`. This avoids re-executing code just to see filtered output.
 
 | Parameter | Description |
 |-----------|-------------|

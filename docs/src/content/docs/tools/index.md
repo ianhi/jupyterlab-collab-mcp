@@ -1,9 +1,9 @@
 ---
 title: Tool Overview
-description: All 41 MCP tools organized by category.
+description: All 39 MCP tools organized by category.
 ---
 
-The MCP server provides 41 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
+The MCP server provides 39 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
 
 ## Categories
 
@@ -17,13 +17,13 @@ Read notebook content with filtering, get outlines, search/grep, fetch outputs.
 Insert, update, delete, copy cells. Batch operations and search-replace.
 
 ### [Execution](./execution/)
-Execute cells and code, run ranges, filter output, clear outputs.
+Execute cells and code (single or range), filter output, clear outputs.
 
 ### [Collaboration](./collaboration/)
 Cell IDs, human-focus protection, advisory locking, change tracking, snapshots.
 
 ### [Metadata & Tags](./metadata/)
-Read and write cell/notebook metadata, manage tags, find cells by tag.
+Read and write cell/notebook metadata, manage and find tags.
 
 ### [Kernel & Analysis](./kernel/)
 Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol rename, diff, notebook rename.
@@ -50,9 +50,8 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `change_cell_type` | Editing | Convert code ↔ markdown |
 | `copy_cells` | Editing | Copy/move cells within/between notebooks (`delete_source=true` to move) |
 | `replace_in_notebook` | Editing | Search and replace across cells |
-| `execute_cell` | Execution | Run a cell |
+| `execute_cell` | Execution | Run one or more cells (single, range via `end_index`, or `cell_ids`) |
 | `execute_code` | Execution | Run code without modifying notebook |
-| `execute_range` | Execution | Run multiple cells in sequence |
 | `filter_output` | Execution | Post-process cached execution output (grep, tail, head, max_lines) |
 | `clear_outputs` | Execution | Clear cell outputs |
 | `get_user_focus` | Collaboration | See user's current cell |
@@ -62,8 +61,7 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `recover_cell` | Collaboration | Re-insert deleted cell |
 | `snapshot` | Collaboration | Save, restore, list, or diff named checkpoints |
 | `cell_metadata` | Metadata | Get or set cell metadata |
-| `cell_tags` | Metadata | Add or remove cell tags |
-| `find_cells_by_tag` | Metadata | Find cells by tag |
+| `cell_tags` | Metadata | Add, remove, or find cell tags |
 | `notebook_metadata` | Metadata | Get or set notebook metadata |
 | `kernel` | Kernel | Check status, interrupt, or restart kernel |
 | `kernel_variables` | Kernel | List or inspect kernel variables |

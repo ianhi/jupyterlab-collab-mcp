@@ -19,10 +19,12 @@ import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCod
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "execute_cell": async (args) => {
-    const { path, index, cell_id, timeout, max_images, include_images } = args as {
+    const { path, index, cell_id, end_index, cell_ids, timeout, max_images, include_images } = args as {
       path: string;
       index?: number;
       cell_id?: string;
+      end_index?: number;
+      cell_ids?: string[];
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
@@ -39,7 +41,80 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const { doc } = await connectToNotebook(path, session.kernelId);
     const cells = doc.getArray("cells");
+    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
 
+    // Range mode: if end_index or cell_ids is provided
+    if (end_index !== undefined || (cell_ids && cell_ids.length > 0)) {
+      let indicesToExecute: number[];
+      let rangeLabel: string;
+
+      if (cell_ids && cell_ids.length > 0) {
+        indicesToExecute = resolveCellIds(cells, cell_ids);
+        rangeLabel = `${indicesToExecute.length} cells by ID`;
+      } else {
+        const startIdx = index ?? 0;
+        const endIdx = end_index ?? cells.length - 1;
+        if (startIdx < 0 || endIdx >= cells.length || startIdx > endIdx) {
+          throw new Error(
+            `Invalid range [${startIdx}, ${endIdx}]. Notebook has ${cells.length} cells.`
+          );
+        }
+        indicesToExecute = [];
+        for (let i = startIdx; i <= endIdx; i++) indicesToExecute.push(i);
+        rangeLabel = `cells ${startIdx}-${endIdx}`;
+      }
+
+      const results: { index: number; cellId?: string; status: string; output?: string }[] = [];
+
+      for (const i of indicesToExecute) {
+        const cell = cells.get(i) as Y.Map<any>;
+        const type = getCellType(cell);
+        const cid = truncatedCellId(cell);
+
+        if (type !== "code") {
+          results.push({ index: i, cellId: cid, status: "skipped (not code)" });
+          continue;
+        }
+
+        const source = extractSource(cell);
+        if (!source.trim()) {
+          results.push({ index: i, cellId: cid, status: "skipped (empty)" });
+          continue;
+        }
+
+        try {
+          const result = await executeCode(session.kernelId, source, timeoutMs);
+          updateCellOutputs(cell, result);
+          const filteredOutput = result.text
+            ? filterOutputText(result.text, { max_output_lines: 5 }).text
+            : undefined;
+          cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
+          results.push({
+            index: i,
+            cellId: cid,
+            status: result.status,
+            output: filteredOutput,
+          });
+        } catch (err: any) {
+          results.push({ index: i, cellId: cid, status: `error: ${err.message}` });
+        }
+      }
+
+      const successCount = results.filter((r) => r.status === "ok").length;
+      const errorCount = results.filter((r) => r.status === "error" || r.status.startsWith("error:")).length;
+      const lastCached = getCachedExecution(path);
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Executed ${rangeLabel} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}${lastCached ? `\n(execution_id: ${lastCached.executionId} — use filter_output to refine last cell output)` : ""}`,
+          },
+        ],
+      };
+    }
+
+    // Single cell mode
     let resolvedIndex = index;
     if (cell_id !== undefined) {
       if (index !== undefined) throw new Error("Specify either 'index' or 'cell_id', not both.");
@@ -56,7 +131,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const cell = cells.get(resolvedIndex) as Y.Map<any>;
     const cellIdStr = getCellId(cell);
     const source = extractSource(cell);
-    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
     const result = await executeCode(session.kernelId, source, timeoutMs);
 
     // Update cell outputs in the notebook
@@ -94,99 +168,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const content = buildExecutionContent(result, "", { max_images, include_images });
     content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
     return { content };
-  },
-
-  "execute_range": async (args) => {
-    const { path, start_index, end_index, cell_ids, timeout } = args as {
-      path: string;
-      start_index?: number;
-      end_index?: number;
-      cell_ids?: string[];
-      timeout?: number;
-    };
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      throw new Error(
-        `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
-      );
-    }
-
-    const { doc } = await connectToNotebook(path, session.kernelId);
-    const cells = doc.getArray("cells");
-
-    // Resolve which indices to execute
-    let indicesToExecute: number[];
-    let rangeLabel: string;
-
-    if (cell_ids && cell_ids.length > 0) {
-      indicesToExecute = resolveCellIds(cells, cell_ids);
-      rangeLabel = `${indicesToExecute.length} cells by ID`;
-    } else {
-      const startIdx = start_index ?? 0;
-      const endIdx = end_index ?? cells.length - 1;
-      if (startIdx < 0 || endIdx >= cells.length || startIdx > endIdx) {
-        throw new Error(
-          `Invalid range [${startIdx}, ${endIdx}]. Notebook has ${cells.length} cells.`
-        );
-      }
-      indicesToExecute = [];
-      for (let i = startIdx; i <= endIdx; i++) indicesToExecute.push(i);
-      rangeLabel = `cells ${startIdx}-${endIdx}`;
-    }
-
-    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-    const results: { index: number; cellId?: string; status: string; output?: string }[] = [];
-
-    for (const i of indicesToExecute) {
-      const cell = cells.get(i) as Y.Map<any>;
-      const type = getCellType(cell);
-      const cid = truncatedCellId(cell);
-
-      if (type !== "code") {
-        results.push({ index: i, cellId: cid, status: "skipped (not code)" });
-        continue;
-      }
-
-      const source = extractSource(cell);
-      if (!source.trim()) {
-        results.push({ index: i, cellId: cid, status: "skipped (empty)" });
-        continue;
-      }
-
-      try {
-        const result = await executeCode(session.kernelId, source, timeoutMs);
-        updateCellOutputs(cell, result);
-        const filteredOutput = result.text
-          ? filterOutputText(result.text, { max_output_lines: 5 }).text
-          : undefined;
-        // Cache the full output for the last cell executed
-        cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
-        results.push({
-          index: i,
-          cellId: cid,
-          status: result.status,
-          output: filteredOutput,
-        });
-      } catch (err: any) {
-        results.push({ index: i, cellId: cid, status: `error: ${err.message}` });
-      }
-    }
-
-    const successCount = results.filter((r) => r.status === "ok").length;
-    const errorCount = results.filter((r) => r.status === "error" || r.status.startsWith("error:")).length;
-    const lastCached = getCachedExecution(path);
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Executed ${rangeLabel} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}${lastCached ? `\n(execution_id: ${lastCached.executionId} — use filter_output to refine last cell output)` : ""}`,
-        },
-      ],
-    };
   },
 
   "clear_outputs": async (args) => {
@@ -502,7 +483,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         ? `No cached execution with ID '${execution_id}'.`
         : `No cached execution for '${path}'.`;
       return {
-        content: [{ type: "text", text: `${hint} Run execute_cell, execute_code, or execute_range first.` }],
+        content: [{ type: "text", text: `${hint} Run execute_cell or execute_code first.` }],
         isError: true,
       };
     }

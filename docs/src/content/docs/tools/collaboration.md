@@ -17,7 +17,7 @@ Cell IDs are **prefix-matched** — use enough characters to be unambiguous. IDs
 
 **Tools with `cell_id`:** `update_cell`, `delete_cell`, `execute_cell`, `change_cell_type`, `insert_cell` (after), `clear_outputs`, `filter_output`, `get_diagnostics`.
 
-**Tools with `cell_ids` array:** `get_notebook_content`, `get_cell_outputs`, `cell_metadata`, `cell_tags`, `delete_cell`, `copy_cells`, `execute_range`, `cell_locks`.
+**Tools with `cell_ids` array:** `get_notebook_content`, `get_cell_outputs`, `cell_metadata`, `cell_tags`, `delete_cell`, `copy_cells`, `execute_cell`, `cell_locks`.
 
 ## Human-focus protection
 

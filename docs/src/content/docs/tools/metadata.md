@@ -37,17 +37,19 @@ cell_metadata(path="nb.ipynb", index=0, metadata={"old_key": null})
 
 ## cell_tags
 
-Add or remove tags from one or more cells.
+Add, remove, or find tags on cells.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `action` | `"add"` \| `"remove"` | Yes | — | Whether to add or remove tags |
+| `action` | `"add"` \| `"remove"` \| `"find"` | Yes | — | Tag operation |
 | `path` | string | Yes | — | Notebook path |
-| `tags` | string[] | Yes | — | Tags to add or remove |
+| `tags` | string[] | Yes | — | Tags to add, remove, or search for |
 | `index` | number | No | — | Cell index |
 | `end_index` | number | No | — | Last cell index (inclusive) |
 | `indices` | number[] | No | — | Specific cell indices |
 | `cell_ids` | string[] | No | — | Cell IDs |
+| `match_all` | boolean | No | `false` | Require ALL tags when `action="find"` (default: match any) |
+| `include_preview` | boolean | No | `false` | Include first line of source when `action="find"` |
 
 **Common tags:** `hide-input`, `hide-output`, `remove-input`, `remove-output`, `remove-cell`, `skip-execution`, `parameters` (papermill).
 
@@ -58,24 +60,12 @@ cell_tags(action="add", path="nb.ipynb", indices=[2, 4, 6, 8], tags=["hide-input
 
 # Remove tags
 cell_tags(action="remove", path="nb.ipynb", cell_ids=["a3f8c2d1"], tags=["hide-input"])
-```
 
----
+# Find cells with specific tags
+cell_tags(action="find", path="nb.ipynb", tags=["parameters"], include_preview=true)
 
-## find_cells_by_tag
-
-Find cells that have specific tags.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `tags` | string[] | Yes | — | Tags to search for |
-| `match_all` | boolean | No | `false` | Require ALL tags (default: match any) |
-| `include_preview` | boolean | No | `false` | Include first line of source |
-
-**Example:**
-```
-find_cells_by_tag(path="nb.ipynb", tags=["parameters"], include_preview=true)
+# Find cells that have ALL specified tags
+cell_tags(action="find", path="nb.ipynb", tags=["parameters", "hide-input"], match_all=true)
 ```
 
 ---

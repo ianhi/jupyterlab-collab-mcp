@@ -113,4 +113,4 @@ All collaboration-relevant tools in one place. For full parameter docs, see the 
 | [`batch_update_cells`](../../tools/editing/#batch_update_cells) | Update multiple cells atomically |
 | [`batch_insert_cells`](../../tools/editing/#batch_insert_cells) | Insert multiple cells at once |
 | [`replace_in_notebook`](../../tools/editing/#replace_in_notebook) | Search and replace across cells |
-| [`execute_range`](../../tools/execution/#execute_range) | Run a section of cells in sequence |
+| [`execute_cell`](../../tools/execution/#execute_cell) | Run one or more cells (single, range, or by cell IDs) |

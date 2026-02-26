@@ -182,7 +182,7 @@ Use tags to mark cells for specific treatment (e.g., `hide-input`, `parameters`,
 cell_tags(action="add", path="nb.ipynb", cell_ids=["a3f8c2d1"], tags=["parameters"])
 
 # Find tagged cells later
-find_cells_by_tag(path="nb.ipynb", tags=["parameters"])
+cell_tags(action="find", path="nb.ipynb", tags=["parameters"])
 ```
 
 ## Recover from mistakes
