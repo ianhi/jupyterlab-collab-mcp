@@ -103,25 +103,22 @@ Don't force-override unless you have a good reason. Move on to a different cell 
 
 ## Manage context efficiently
 
-Notebooks can be large. Use these patterns to avoid context blowout:
+Notebooks can be large. The server is designed to be stingy by default — outputs are truncated, diffs are omitted from inserts, and `list_files` uses a compact format. Use these patterns:
 
-- **Skip markdown cells** — `get_notebook_content` defaults to `cell_type="code"`, which skips markdown. Only use `cell_type="all"` when you need prose.
-- **Skip outputs by default** — `include_outputs=false` (the default) keeps responses small. Only request outputs when you need to check execution results.
-- **Limit images** — for cells that produce plots, use `max_images=2` or `include_images=false` to prevent large base64 blobs from filling your context.
-- **Read specific cells** — use `cell_ids` or `indices` to read only the cells you need, not the whole notebook.
-- **Use `get_notebook_outline`** — get a condensed view (headers + first lines) before reading full cells.
-- **Check outputs separately** — use `get_cell_outputs` to check execution results for specific cells without re-reading all source code.
+**Reading:**
+- `get_notebook_content` defaults to `cell_type="code"` (skips markdown) and `include_outputs=false`
+- Use `get_notebook_outline` first to find cell indices, then read specific cells with `cell_ids`
+- When including outputs, `max_output_chars=500` truncates per cell (set 0 for unlimited)
 
-```
-# Good — read only what you need
-get_notebook_content(path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"], include_outputs=true)
+**Execution:**
+- Output is auto-truncated to 50 lines with a head/tail split (set `max_output_lines: 0` for unlimited)
+- Use `output_tail=20` to see only the last 20 lines (useful for training logs)
+- Use `output_grep="Error|Warning"` to filter output to only matching lines
+- Use `max_images=2` or `include_images=false` for plot-heavy cells
 
-# Good — check results without re-fetching source
-get_cell_outputs(path="nb.ipynb", cell_ids=["a3f8c2d1"], include_images=false)
-
-# Risky — reads everything with all outputs
-get_notebook_content(path="nb.ipynb", cell_type="all", include_outputs=true)
-```
+**Editing:**
+- `insert_cell` and `batch_insert_cells` return compact confirmations (no diffs)
+- `update_and_execute` omits diffs by default (set `show_diff=true` if needed)
 
 ## Poll for changes from others
 

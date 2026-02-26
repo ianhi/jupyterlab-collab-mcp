@@ -149,6 +149,10 @@ export const toolSchemas = [
           items: { type: "string" },
           description: "Select cells by ID (prefix match). Takes precedence over indices and start_index/end_index.",
         },
+        max_output_chars: {
+          type: "number",
+          description: "Truncate output text per cell to this many chars when include_outputs=true. Default: 500. Set 0 for unlimited.",
+        },
       },
       required: ["path"],
     },
@@ -196,9 +200,9 @@ export const toolSchemas = [
           type: "number",
           description: "Maximum number of matching cells to return. Default: unlimited",
         },
-        max_source_length: {
+        context_lines: {
           type: "number",
-          description: "Truncate source/output to this length (adds ... if truncated). Default: 500",
+          description: "Number of lines to show before and after each matching line. Default: 1",
         },
       },
       required: ["path", "pattern"],
@@ -711,6 +715,18 @@ export const toolSchemas = [
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
         },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
+        },
       },
       required: ["path"],
     },
@@ -747,6 +763,18 @@ export const toolSchemas = [
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
         },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
+        },
       },
       required: ["path", "code"],
     },
@@ -779,6 +807,18 @@ export const toolSchemas = [
         timeout: {
           type: "number",
           description: "Timeout per cell in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
+        },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines per cell (default 50). Head/tail split. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output per cell. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
         },
       },
       required: ["path"],
@@ -818,6 +858,18 @@ export const toolSchemas = [
         include_images: {
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
+        },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
         },
         client_name: {
           type: "string",
@@ -865,6 +917,22 @@ export const toolSchemas = [
         include_images: {
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
+        },
+        show_diff: {
+          type: "boolean",
+          description: "Include a diff of the source change. Default: false",
+        },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
         },
         client_name: {
           type: "string",
@@ -937,6 +1005,18 @@ export const toolSchemas = [
         include_images: {
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
+        },
+        max_output_lines: {
+          type: "number",
+          description: "Max output lines per cell (default 50). Head/tail split. Set 0 for unlimited.",
+        },
+        output_tail: {
+          type: "number",
+          description: "Show only last N lines of output per cell. Overrides max_output_lines.",
+        },
+        output_grep: {
+          type: "string",
+          description: "Regex filter — only include output lines matching this pattern.",
         },
       },
       required: ["path"],

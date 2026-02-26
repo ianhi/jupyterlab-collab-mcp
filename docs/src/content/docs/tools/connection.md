@@ -38,6 +38,10 @@ List files and directories in the Jupyter file system. Use to discover available
 list_files(path="projects/")
 ```
 
+**Notes:**
+- Returns a compact listing: one line per item with `[dir]`, `[notebook]`, or `[file]` tags
+- Sorted: directories first, then notebooks, then other files
+
 ---
 
 ## list_notebooks

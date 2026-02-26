@@ -176,11 +176,15 @@ export const handlers: Record<
         return a.name.localeCompare(b.name);
       });
 
+      const lines = items.map((item: any) => {
+        const tag = item.type === "directory" ? "[dir]" : item.type === "notebook" ? "[notebook]" : "[file]";
+        return `  ${item.name.padEnd(30)} ${tag}`;
+      });
       return {
         content: [
           {
             type: "text",
-            text: `Files in ${resolved}:\n\n${JSON.stringify(items, null, 2)}`,
+            text: `${resolved}/ (${items.length} items)\n${lines.join("\n")}`,
           },
         ],
       };
@@ -238,11 +242,15 @@ export const handlers: Record<
       return a.name.localeCompare(b.name);
     });
 
+    const lines = items.map((item: any) => {
+      const tag = item.type === "directory" ? "[dir]" : item.type === "notebook" ? "[notebook]" : "[file]";
+      return `  ${item.name.padEnd(30)} ${tag}`;
+    });
     return {
       content: [
         {
           type: "text",
-          text: `Files in ${path || "/"}:\n\n${JSON.stringify(items, null, 2)}`,
+          text: `${path || "/"}/ (${items.length} items)\n${lines.join("\n")}`,
         },
       ],
     };

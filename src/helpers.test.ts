@@ -16,6 +16,8 @@ import {
   extractOutputsWithTraceback,
   truncateDiff,
   formatTimeRemaining,
+  stripAnsi,
+  filterOutputText,
   type ExecutionResult,
 } from "./helpers.js";
 
@@ -868,5 +870,143 @@ describe("formatTimeRemaining", () => {
 
   it("rounds fractional seconds", () => {
     expect(formatTimeRemaining(59.7)).toBe("1m 0s");
+  });
+});
+
+describe("stripAnsi", () => {
+  it("returns plain text unchanged", () => {
+    expect(stripAnsi("hello world")).toBe("hello world");
+  });
+
+  it("strips color codes", () => {
+    expect(stripAnsi("\x1b[31mred text\x1b[0m")).toBe("red text");
+  });
+
+  it("strips bold and underline codes", () => {
+    expect(stripAnsi("\x1b[1mbold\x1b[22m \x1b[4munderline\x1b[24m")).toBe("bold underline");
+  });
+
+  it("strips complex sequences with semicolons", () => {
+    expect(stripAnsi("\x1b[38;5;196mcolored\x1b[0m")).toBe("colored");
+  });
+
+  it("handles empty string", () => {
+    expect(stripAnsi("")).toBe("");
+  });
+
+  it("handles null/undefined", () => {
+    expect(stripAnsi(null as any)).toBe(null);
+    expect(stripAnsi(undefined as any)).toBe(undefined);
+  });
+
+  it("strips real Python traceback ANSI codes", () => {
+    const ansiTraceback = "\x1b[0;31mValueError\x1b[0m: \x1b[0;31minvalid literal\x1b[0m";
+    expect(stripAnsi(ansiTraceback)).toBe("ValueError: invalid literal");
+  });
+
+  it("strips OSC sequences", () => {
+    expect(stripAnsi("\x1b]0;title\x07text")).toBe("text");
+  });
+});
+
+describe("filterOutputText", () => {
+  it("returns empty for empty input", () => {
+    const result = filterOutputText("");
+    expect(result.text).toBe("");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("returns null/undefined input safely", () => {
+    const result = filterOutputText(null as any);
+    expect(result.text).toBe("");
+    expect(result.truncated).toBe(false);
+  });
+
+  it("truncates at default 50 lines with head/tail split", () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
+    const result = filterOutputText(lines.join("\n"));
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("line 1");
+    expect(result.text).toContain("line 30"); // head (60% of 50 = 30)
+    expect(result.text).toContain("line 100"); // tail
+    expect(result.text).toContain("lines omitted");
+    expect(result.note).toContain("50 lines omitted");
+  });
+
+  it("does not truncate when under 50 lines", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    const result = filterOutputText(lines.join("\n"));
+    expect(result.truncated).toBe(false);
+    expect(result.text).toBe(lines.join("\n"));
+  });
+
+  it("max_output_lines: 0 disables truncation", () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
+    const result = filterOutputText(lines.join("\n"), { max_output_lines: 0 });
+    expect(result.truncated).toBe(false);
+    expect(result.text).toBe(lines.join("\n"));
+  });
+
+  it("output_tail returns last N lines", () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
+    const result = filterOutputText(lines.join("\n"), { output_tail: 5 });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toBe("line 96\nline 97\nline 98\nline 99\nline 100");
+    expect(result.note).toContain("last 5");
+  });
+
+  it("output_grep filters matching lines", () => {
+    const text = "apple\nbanana\napricot\ncherry\navocado";
+    const result = filterOutputText(text, { output_grep: "^a" });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("apple");
+    expect(result.text).toContain("apricot");
+    expect(result.text).toContain("avocado");
+    expect(result.text).not.toContain("banana");
+    expect(result.text).not.toContain("cherry");
+  });
+
+  it("output_grep shows message when no match", () => {
+    const text = "apple\nbanana\ncherry";
+    const result = filterOutputText(text, { output_grep: "xyz" });
+    expect(result.truncated).toBe(true);
+    expect(result.text).toContain("no lines matched");
+  });
+
+  it("output_tail overrides max_output_lines", () => {
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i + 1}`);
+    const result = filterOutputText(lines.join("\n"), { max_output_lines: 10, output_tail: 3 });
+    expect(result.text).toBe("line 98\nline 99\nline 100");
+  });
+});
+
+describe("formatOutputsAsText strips ANSI", () => {
+  it("strips ANSI from stream output", () => {
+    const outputs = [{ output_type: "stream", text: "\x1b[31mred\x1b[0m" }];
+    expect(formatOutputsAsText(outputs)).toBe("red");
+  });
+
+  it("strips ANSI from error output", () => {
+    const outputs = [{
+      output_type: "error",
+      ename: "\x1b[1mValueError\x1b[0m",
+      evalue: "\x1b[31minvalid\x1b[0m",
+    }];
+    expect(formatOutputsAsText(outputs)).toBe("ValueError: invalid");
+  });
+});
+
+describe("extractOutputsWithTraceback strips ANSI", () => {
+  it("strips ANSI from traceback lines", () => {
+    const outputs = [{
+      output_type: "error",
+      ename: "ValueError",
+      evalue: "bad",
+      traceback: ["\x1b[0;31mTraceback\x1b[0m", "\x1b[1;32m  File 'test.py'\x1b[0m"],
+    }];
+    const result = extractOutputsWithTraceback(outputs);
+    expect(result).not.toContain("\x1b");
+    expect(result).toContain("Traceback");
+    expect(result).toContain("File 'test.py'");
   });
 });

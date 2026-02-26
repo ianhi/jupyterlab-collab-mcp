@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 import crypto from "node:crypto";
-import type { NotebookOutput, ExecutionResult } from "./helpers.js";
+import { stripAnsi, type NotebookOutput, type ExecutionResult } from "./helpers.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -103,13 +103,14 @@ export async function lspRequest(
     const wsUrl = `${config.wsUrl}/lsp/ws/${languageServer}?token=${config.token}`;
     const ws = new WebSocket(wsUrl);
     const msgId = Date.now();
-
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error(`LSP request timeout after ${timeoutMs}ms`));
-    }, timeoutMs);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     ws.on("open", () => {
+      timeoutId = setTimeout(() => {
+        ws.close();
+        reject(new Error(`LSP request timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+
       const request = {
         jsonrpc: "2.0",
         id: msgId,
@@ -123,7 +124,7 @@ export async function lspRequest(
       try {
         const msg = JSON.parse(data.toString());
         if (msg.id === msgId) {
-          clearTimeout(timeout);
+          clearTimeout(timeoutId);
           ws.close();
           if (msg.error) {
             reject(new Error(msg.error.message || "LSP error"));
@@ -138,8 +139,13 @@ export async function lspRequest(
     });
 
     ws.on("error", (err) => {
-      clearTimeout(timeout);
+      clearTimeout(timeoutId);
       reject(err);
+    });
+
+    ws.on("close", () => {
+      clearTimeout(timeoutId);
+      reject(new Error("WebSocket closed unexpectedly before LSP response"));
     });
   });
 }
@@ -341,12 +347,14 @@ export async function executeCode(
     let executionCount: number | null = null;
 
     const timeoutSecs = Math.round(timeoutMs / 1000);
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error(`Execution timeout after ${timeoutSecs} seconds`));
-    }, timeoutMs);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     ws.on("open", () => {
+      // Start timeout only after WebSocket connects and request is sent
+      timeoutId = setTimeout(() => {
+        ws.close();
+        reject(new Error(`Execution timeout after ${timeoutSecs} seconds`));
+      }, timeoutMs);
       const msg = {
         header: {
           msg_id: msgId,
@@ -383,7 +391,7 @@ export async function executeCode(
             name: msg.content.name,
             text: msg.content.text,
           });
-          textParts.push(msg.content.text);
+          textParts.push(stripAnsi(msg.content.text));
           break;
 
         case "execute_result":
@@ -394,7 +402,7 @@ export async function executeCode(
             metadata: msg.content.metadata || {},
           });
           // Extract text
-          textParts.push(msg.content.data?.["text/plain"] || "");
+          textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
           // Extract images
           if (msg.content.data?.["image/png"]) {
             images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
@@ -414,7 +422,7 @@ export async function executeCode(
             data: msg.content.data,
             metadata: msg.content.metadata || {},
           });
-          textParts.push(msg.content.data?.["text/plain"] || "");
+          textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
           // Extract images from display_data (matplotlib, etc.)
           if (msg.content.data?.["image/png"]) {
             images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
@@ -435,12 +443,12 @@ export async function executeCode(
             evalue: msg.content.evalue,
             traceback: msg.content.traceback,
           });
-          textParts.push(`${msg.content.ename}: ${msg.content.evalue}`);
+          textParts.push(stripAnsi(`${msg.content.ename}: ${msg.content.evalue}`));
           break;
 
         case "execute_reply":
           executionCount = msg.content.execution_count;
-          clearTimeout(timeout);
+          clearTimeout(timeoutId);
           ws.close();
           resolve({
             status,
@@ -455,8 +463,14 @@ export async function executeCode(
     });
 
     ws.on("error", (err) => {
-      clearTimeout(timeout);
+      clearTimeout(timeoutId);
       reject(err);
+    });
+
+    ws.on("close", () => {
+      clearTimeout(timeoutId);
+      // If neither resolve nor reject was called yet, reject on unexpected close
+      reject(new Error("WebSocket closed unexpectedly before execution completed"));
     });
   });
 }

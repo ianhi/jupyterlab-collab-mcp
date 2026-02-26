@@ -32,6 +32,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       end_index,
       indices,
       cell_ids,
+      max_output_chars = 500,
     } = args as {
       path: string;
       cell_type?: "all" | "code" | "markdown";
@@ -41,6 +42,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       end_index?: number;
       indices?: number[];
       cell_ids?: string[];
+      max_output_chars?: number;
     };
 
     // Helper to build cell data from either backend
@@ -60,7 +62,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         if (outputs) {
           const outputsJson = outputs instanceof Y.Array ? outputs.toJSON() : (Array.isArray(outputs) ? outputs : []);
           if (output_format === "text") {
-            const combinedText = formatOutputsAsText(outputsJson);
+            let combinedText = formatOutputsAsText(outputsJson);
+            if (combinedText && max_output_chars && combinedText.length > max_output_chars) {
+              combinedText = combinedText.slice(0, max_output_chars) + `... (${combinedText.length} chars total)`;
+            }
             if (combinedText) cellData.output = combinedText;
           } else {
             cellData.outputs = outputsJson.map((out: any) => {
@@ -219,20 +224,45 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       search_in = "all",
       case_sensitive = false,
       max_results,
-      max_source_length = 500,
+      context_lines = 1,
     } = args as {
       path: string;
       pattern: string;
       search_in?: "source" | "outputs" | "all";
       case_sensitive?: boolean;
       max_results?: number;
-      max_source_length?: number;
+      context_lines?: number;
     };
 
     const regex = createSafeRegex(pattern, case_sensitive);
-    const truncate = (text: string): string => {
-      if (text.length <= max_source_length) return text;
-      return text.slice(0, max_source_length) + "...";
+    const getMatchingLines = (text: string, re: RegExp): string => {
+      const lines = text.split("\n");
+      const matchingLineNums = new Set<number>();
+      for (let i = 0; i < lines.length; i++) {
+        re.lastIndex = 0;
+        if (re.test(lines[i])) matchingLineNums.add(i);
+      }
+      if (matchingLineNums.size === 0) return "";
+
+      // Add context lines
+      const contextSet = new Set<number>();
+      for (const ln of matchingLineNums) {
+        for (let c = Math.max(0, ln - context_lines); c <= Math.min(lines.length - 1, ln + context_lines); c++) {
+          contextSet.add(c);
+        }
+      }
+      const sorted = [...contextSet].sort((a, b) => a - b);
+
+      // Format with line numbers and ellipsis between non-contiguous groups
+      const result: string[] = [];
+      let prev = -2;
+      for (const ln of sorted) {
+        if (ln > prev + 1 && result.length > 0) result.push("  ...");
+        const marker = matchingLineNums.has(ln) ? ">" : " ";
+        result.push(`${marker} L${ln + 1}: ${lines[ln]}`);
+        prev = ln;
+      }
+      return result.join("\n");
     };
 
     // Shared search logic for both backends
@@ -254,7 +284,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           if (sourceMatches) {
             hasMatch = true;
             cellMatches.source_matches = sourceMatches.length;
-            cellMatches.source = truncate(source);
+            cellMatches.source = getMatchingLines(source, regex);
           }
         }
 
@@ -280,7 +310,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
             if (outputMatches) {
               hasMatch = true;
               cellMatches.output_matches = outputMatches.length;
-              cellMatches.output = truncate(combinedOutput);
+              cellMatches.output = getMatchingLines(combinedOutput, regex);
             }
           }
         }

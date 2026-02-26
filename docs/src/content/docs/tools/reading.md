@@ -19,6 +19,7 @@ Get cells from a notebook. By default returns only source code (no outputs) to s
 | `end_index` | number | No | last cell | End at this cell index (inclusive) |
 | `indices` | number[] | No | — | Specific cell indices (e.g., `[2,5,8]`). Overrides start/end |
 | `cell_ids` | string[] | No | — | Select by cell ID (prefix match). Overrides indices |
+| `max_output_chars` | number | No | `500` | Truncate output per cell to this many chars. Set 0 for unlimited |
 
 **Examples:**
 ```
@@ -71,7 +72,7 @@ Search/grep through notebook cells for a pattern (regex supported).
 | `search_in` | `"source"` \| `"outputs"` \| `"all"` | No | `"all"` | Where to search |
 | `case_sensitive` | boolean | No | `false` | Case-sensitive search |
 | `max_results` | number | No | unlimited | Maximum matching cells to return |
-| `max_source_length` | number | No | `500` | Truncate source/output to this length |
+| `context_lines` | number | No | `1` | Lines of context around each match |
 
 **Examples:**
 ```
@@ -97,6 +98,9 @@ Get execution outputs from specific cells without fetching source code.
 | `cell_ids` | string[] | No | — | Cell IDs (alternative to indices) |
 | `max_images` | number | No | all | Maximum images to return (shows last N) |
 | `include_images` | boolean | No | `true` | Include images in response |
+| `max_output_lines` | number | No | `50` | Max output lines per cell. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines per cell. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Example:**
 ```

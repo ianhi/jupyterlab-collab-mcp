@@ -86,3 +86,4 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `rename_symbol` | Kernel | Scope-aware rename |
 | `rename_notebook` | Kernel | Rename notebook file |
 | `diff_notebooks` | Kernel | Compare two notebooks |
+| `report_issue` | Feedback | Submit a feedback report |

@@ -82,15 +82,8 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         newSource: source,
         client: clientId,
       });
-      const insertDiff = [
-        `--- /dev/null`,
-        `+++ ${path}:cell[${insertIndex}]`,
-        `@@ -0,0 +1,${source.split("\n").length} @@`,
-        ...source.split("\n").map((line) => `+${line}`),
-      ].join("\n");
-
       return {
-        content: [{ type: "text", text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}\n\n${insertDiff}` }],
+        content: [{ type: "text", text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}` }],
       };
     }
 
@@ -141,20 +134,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       client: clientId,
     }, doc);
 
-    // Show what was inserted
     const newId = newCellId.slice(0, 8);
-    const insertDiff = [
-      `--- /dev/null`,
-      `+++ ${path}:cell[${insertIndex}]`,
-      `@@ -0,0 +1,${source.split("\n").length} @@`,
-      ...source.split("\n").map((line) => `+${line}`),
-    ].join("\n");
 
     return {
       content: [
         {
           type: "text",
-          text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}\n\n${insertDiff}`,
+          text: `Inserted ${cell_type} cell at index ${insertIndex} (id: ${newId}) in ${path}`,
         },
       ],
     };
@@ -469,19 +455,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           client: clientId,
         });
 
-        const insertDiff = [
-          `--- /dev/null`,
-          `+++ ${path}:cell[${insertIndex}]`,
-          `@@ -0,0 +1,${ins.source.split("\n").length} @@`,
-          ...ins.source.split("\n").map((line) => `+${line}`),
-        ].join("\n");
-        results.push(`Cell ${insertIndex} (${newId}) ${cellType}:\n${insertDiff}`);
+        results.push(`  [${insertIndex}] ${newId} (${cellType})`);
       }
 
       await writeNotebook(resolved, notebook);
 
       return {
-        content: [{ type: "text", text: `Inserted ${inserts.length} cells in ${path}\n\n${results.join("\n\n")}` }],
+        content: [{ type: "text", text: `Inserted ${inserts.length} cells in ${path}\n${results.join("\n")}` }],
       };
     }
 
@@ -535,20 +515,14 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         client: clientId,
       }, doc);
 
-      const insertDiff = [
-        `--- /dev/null`,
-        `+++ ${path}:cell[${insertIndex}]`,
-        `@@ -0,0 +1,${ins.source.split("\n").length} @@`,
-        ...ins.source.split("\n").map((line) => `+${line}`),
-      ].join("\n");
-      results.push(`Cell ${insertIndex} (${newId}) ${cellType}:\n${insertDiff}`);
+      results.push(`  [${insertIndex}] ${newId} (${cellType})`);
     }
 
     return {
       content: [
         {
           type: "text",
-          text: `Inserted ${inserts.length} cells in ${path}\n\n${results.join("\n\n")}`,
+          text: `Inserted ${inserts.length} cells in ${path}\n${results.join("\n")}`,
         },
       ],
     };

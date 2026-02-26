@@ -14,6 +14,8 @@ import {
   truncateDiff,
   checkHumanFocus,
   formatTimeRemaining,
+  filterOutputText,
+  type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
 import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode } from "../connection.js";
@@ -22,13 +24,16 @@ import { checkLock } from "../cell-locks.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "execute_cell": async (args) => {
-    const { path, index, cell_id, timeout, max_images, include_images } = args as {
+    const { path, index, cell_id, timeout, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
       path: string;
       index?: number;
       cell_id?: string;
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -66,17 +71,20 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       updateCellOutputs(cell, result);
     }
 
-    return { content: buildExecutionContent(result, "", { max_images, include_images }) };
+    return { content: buildExecutionContent(result, "", { max_images, include_images, max_output_lines, output_tail, output_grep }) };
   },
 
   "execute_code": async (args) => {
-    const { path, code, insertCell, timeout, max_images, include_images } = args as {
+    const { path, code, insertCell, timeout, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
       path: string;
       code: string;
       insertCell?: boolean;
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -89,7 +97,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-    const imgOpts = { max_images, include_images };
+    const imgOpts = { max_images, include_images, max_output_lines, output_tail, output_grep };
 
     if (insertCell) {
       // Insert as a new cell and execute with visible outputs
@@ -119,7 +127,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "insert_and_execute": async (args) => {
-    const { path, index, cell_id, source, timeout, max_images, include_images, client_name } = args as {
+    const { path, index, cell_id, source, timeout, max_images, include_images, max_output_lines, output_tail, output_grep, client_name } = args as {
       path: string;
       index?: number;
       cell_id?: string;
@@ -127,6 +135,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
       client_name?: string;
     };
     const clientId = client_name || "claude-code";
@@ -180,11 +191,11 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     updateCellOutputs(newCell, result);
 
     const newId = newCellId.slice(0, 8);
-    return { content: buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images }) };
+    return { content: buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images, max_output_lines, output_tail, output_grep }) };
   },
 
   "update_and_execute": async (args) => {
-    const { path, index, cell_id, source, force = false, timeout, max_images, include_images, client_name } = args as {
+    const { path, index, cell_id, source, force = false, timeout, max_images, include_images, show_diff = false, max_output_lines, output_tail, output_grep, client_name } = args as {
       path: string;
       index?: number;
       cell_id?: string;
@@ -193,6 +204,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      show_diff?: boolean;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
       client_name?: string;
     };
     const clientId = client_name || "claude-code";
@@ -279,20 +294,27 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       updateCellOutputs(cell, result);
     }
 
-    // Generate diff
     const cellIdStr = truncatedCellId(cell);
-    const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
+    let prefix = `Updated and executed cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
+    if (show_diff) {
+      const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
+      prefix += `\n\n${truncateDiff(diff)}`;
+    }
+    prefix += "\n\nOutput:\n";
 
-    return { content: buildExecutionContent(result, `Updated and executed cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}\n\n${truncateDiff(diff)}\n\nOutput:\n`, { max_images, include_images }) };
+    return { content: buildExecutionContent(result, prefix, { max_images, include_images, max_output_lines, output_tail, output_grep }) };
   },
 
   "execute_range": async (args) => {
-    const { path, start_index, end_index, cell_ids, timeout } = args as {
+    const { path, start_index, end_index, cell_ids, timeout, max_output_lines, output_tail, output_grep } = args as {
       path: string;
       start_index?: number;
       end_index?: number;
       cell_ids?: string[];
       timeout?: number;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -349,11 +371,14 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       try {
         const result = await executeCode(session.kernelId, source, timeoutMs);
         updateCellOutputs(cell, result);
+        const filteredOutput = result.text
+          ? filterOutputText(result.text, { max_output_lines: max_output_lines ?? 5, output_tail, output_grep }).text
+          : undefined;
         results.push({
           index: i,
           cellId: cid,
           status: result.status,
-          output: result.text ? result.text.slice(0, 100) + (result.text.length > 100 ? "..." : "") : undefined,
+          output: filteredOutput,
         });
       } catch (err: any) {
         results.push({ index: i, cellId: cid, status: `error: ${err.message}` });
@@ -492,7 +517,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "get_cell_outputs": async (args) => {
-    const { path, index, end_index, indices, cell_ids, max_images, include_images } = args as {
+    const { path, index, end_index, indices, cell_ids, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
       path: string;
       index?: number;
       end_index?: number;
@@ -500,6 +525,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cell_ids?: string[];
       max_images?: number;
       include_images?: boolean;
+      max_output_lines?: number;
+      output_tail?: number;
+      output_grep?: string;
     };
 
     if (!isJupyterConnected()) {
@@ -541,11 +569,17 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           }
         }
 
+        let text = textParts.join("");
+        if (text) {
+          const filtered = filterOutputText(text, { max_output_lines, output_tail, output_grep });
+          text = filtered.text;
+          if (filtered.note) text += `\n[${filtered.note}]`;
+        }
         results.push({
           index: idx,
           type,
           execution_count: executionCount,
-          text: textParts.join(""),
+          text,
           output_count: outputs.length,
         });
       }
@@ -614,11 +648,17 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
       }
 
+      let text = textParts.join("");
+      if (text) {
+        const filtered = filterOutputText(text, { max_output_lines, output_tail, output_grep });
+        text = filtered.text;
+        if (filtered.note) text += `\n[${filtered.note}]`;
+      }
       results.push({
         index: idx,
         type,
         execution_count: executionCount,
-        text: textParts.join(""),
+        text,
         output_count: outputsJson.length,
       });
     }

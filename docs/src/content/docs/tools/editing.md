@@ -23,6 +23,9 @@ Insert a new cell into the notebook.
 insert_cell(path="nb.ipynb", source="import pandas as pd", index=0)
 ```
 
+**Notes:**
+- Response is a compact confirmation message (no diff shown)
+
 ---
 
 ## update_cell
@@ -97,6 +100,9 @@ batch_insert_cells(path="nb.ipynb", inserts=[
   {source: "import numpy as np", index: 2}
 ])
 ```
+
+**Notes:**
+- Response lists inserted cells compactly: `[index] id (type)` per line (no diffs)
 
 ---
 

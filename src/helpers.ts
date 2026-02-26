@@ -6,6 +6,113 @@
 import * as Y from "yjs";
 
 /**
+ * Strip ANSI escape codes from text.
+ * Handles color codes, OSC sequences, and other terminal escapes.
+ */
+export function stripAnsi(text: string): string {
+  if (!text) return text;
+  return text.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b[^[\]].?/g, "");
+}
+
+/**
+ * Options for filtering output text (truncation, tail, grep).
+ */
+export interface OutputFilterOptions {
+  max_output_lines?: number;  // default 50, head/tail split
+  output_tail?: number;       // last N lines (overrides max_output_lines)
+  output_grep?: string;       // regex filter on lines
+}
+
+/**
+ * Filter output text by truncation, tail, or grep.
+ * Returns the filtered text and metadata about what was filtered.
+ */
+export function filterOutputText(
+  text: string,
+  options: OutputFilterOptions = {}
+): { text: string; truncated: boolean; totalLines: number; note?: string } {
+  if (!text) return { text: text || "", truncated: false, totalLines: 0 };
+
+  const lines = text.split("\n");
+  const totalLines = lines.length;
+
+  // Step 1: grep filter (applied first)
+  let filtered = lines;
+  let grepNote: string | undefined;
+  if (options.output_grep) {
+    const regex = createSafeRegex(options.output_grep, true);
+    filtered = lines.filter(line => regex.test(line));
+    // Reset lastIndex since we're using global flag
+    regex.lastIndex = 0;
+    if (filtered.length === 0) {
+      return {
+        text: `(no lines matched pattern "${options.output_grep}" in ${totalLines} lines of output)`,
+        truncated: true,
+        totalLines,
+        note: `No lines matched "${options.output_grep}"`,
+      };
+    }
+    grepNote = `${filtered.length} of ${totalLines} lines matched "${options.output_grep}"`;
+  }
+
+  // Step 2: tail (overrides max_output_lines)
+  if (options.output_tail !== undefined && options.output_tail > 0) {
+    const n = options.output_tail;
+    if (filtered.length > n) {
+      const omitted = filtered.length - n;
+      const result = filtered.slice(-n);
+      const note = grepNote
+        ? `${grepNote}, showing last ${n}`
+        : `showing last ${n} of ${totalLines} lines`;
+      return {
+        text: result.join("\n"),
+        truncated: true,
+        totalLines,
+        note,
+      };
+    }
+    // fits within tail, but might have grep note
+    if (grepNote) {
+      return { text: filtered.join("\n"), truncated: true, totalLines, note: grepNote };
+    }
+    return { text: filtered.join("\n"), truncated: false, totalLines };
+  }
+
+  // Step 3: max_output_lines (default 50, 0 = unlimited)
+  const maxLines = options.max_output_lines ?? 50;
+  if (maxLines === 0) {
+    // Unlimited
+    if (grepNote) {
+      return { text: filtered.join("\n"), truncated: true, totalLines, note: grepNote };
+    }
+    return { text: filtered.join("\n"), truncated: false, totalLines };
+  }
+
+  if (filtered.length > maxLines) {
+    const headCount = Math.ceil(maxLines * 0.6);
+    const tailCount = maxLines - headCount;
+    const omitted = filtered.length - maxLines;
+    const head = filtered.slice(0, headCount);
+    const tail = filtered.slice(-tailCount);
+
+    const truncNote = `${omitted} lines omitted, showing ${headCount} head + ${tailCount} tail of ${filtered.length}`;
+    const note = grepNote ? `${grepNote}; ${truncNote}` : truncNote;
+
+    return {
+      text: [...head, `\n... (${truncNote}) ...\n`, ...tail].join("\n"),
+      truncated: true,
+      totalLines,
+      note,
+    };
+  }
+
+  if (grepNote) {
+    return { text: filtered.join("\n"), truncated: true, totalLines, note: grepNote };
+  }
+  return { text: filtered.join("\n"), truncated: false, totalLines };
+}
+
+/**
  * Extract source code from a cell (handles Y.Map, Y.Text, plain objects, arrays)
  */
 export function extractSource(cell: any): string {
@@ -200,15 +307,15 @@ export function formatOutputsAsText(outputs: any[]): string {
   for (const out of outputs) {
     switch (out.output_type) {
       case "stream":
-        parts.push(out.text || "");
+        parts.push(stripAnsi(out.text || ""));
         break;
       case "execute_result":
       case "display_data":
         const text = out.data?.["text/plain"];
-        if (text) parts.push(text);
+        if (text) parts.push(stripAnsi(text));
         break;
       case "error":
-        parts.push(`${out.ename}: ${out.evalue}`);
+        parts.push(stripAnsi(`${out.ename}: ${out.evalue}`));
         break;
     }
   }
@@ -223,12 +330,12 @@ export function extractOutputText(output: any): string {
 
   switch (output.output_type) {
     case "stream":
-      return output.text || "";
+      return stripAnsi(output.text || "");
     case "execute_result":
     case "display_data":
-      return output.data?.["text/plain"] || "";
+      return stripAnsi(output.data?.["text/plain"] || "");
     case "error":
-      return `${output.ename}: ${output.evalue}`;
+      return stripAnsi(`${output.ename}: ${output.evalue}`);
     default:
       return "";
   }
@@ -353,17 +460,17 @@ export function extractOutputsWithTraceback(outputs: any[]): string {
   for (const out of outputs) {
     switch (out.output_type) {
       case "stream":
-        parts.push(out.text || "");
+        parts.push(stripAnsi(out.text || ""));
         break;
       case "execute_result":
       case "display_data":
         const text = out.data?.["text/plain"];
-        if (text) parts.push(text);
+        if (text) parts.push(stripAnsi(text));
         break;
       case "error":
-        parts.push(`${out.ename}: ${out.evalue}`);
+        parts.push(stripAnsi(`${out.ename}: ${out.evalue}`));
         if (out.traceback) {
-          parts.push(out.traceback.join("\n"));
+          parts.push(stripAnsi(out.traceback.join("\n")));
         }
         break;
     }
@@ -527,14 +634,32 @@ export function formatTimeRemaining(totalSeconds: number): string {
 export function buildExecutionContent(
   result: ExecutionResult,
   textPrefix: string,
-  options: { max_images?: number; include_images?: boolean } = {}
+  options: { max_images?: number; include_images?: boolean } & OutputFilterOptions = {}
 ): any[] {
-  const { max_images, include_images = true } = options;
+  const { max_images, include_images = true, max_output_lines, output_tail, output_grep } = options;
+
+  let outputText = result.text || "(no output)";
+
+  // Apply output filtering if any filter options are set
+  if (result.text && (max_output_lines !== undefined || output_tail !== undefined || output_grep !== undefined)) {
+    const filtered = filterOutputText(result.text, { max_output_lines, output_tail, output_grep });
+    outputText = filtered.text;
+    if (filtered.note) {
+      outputText += `\n\n[${filtered.note}]`;
+    }
+  } else if (result.text) {
+    // Apply default truncation (50 lines) when no explicit options given
+    const filtered = filterOutputText(result.text, {});
+    outputText = filtered.text;
+    if (filtered.note) {
+      outputText += `\n\n[${filtered.note}]`;
+    }
+  }
 
   const content: any[] = [
     {
       type: "text",
-      text: textPrefix + (result.text || "(no output)"),
+      text: textPrefix + outputText,
     },
   ];
 

@@ -17,6 +17,9 @@ Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are re
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return (shows last N) |
 | `include_images` | boolean | No | `true` | Include images in response |
+| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Examples:**
 ```
@@ -48,6 +51,9 @@ Execute code in the notebook's kernel without modifying the notebook. Works with
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return |
 | `include_images` | boolean | No | `true` | Include images in response |
+| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Examples:**
 ```
@@ -71,6 +77,9 @@ Execute multiple cells in sequence. Continues on error (doesn't stop). Automatic
 | `end_index` | number | No | last cell | Last cell index (inclusive) |
 | `cell_ids` | string[] | No | — | Cell IDs to execute in order |
 | `timeout` | number | No | `30000` | Timeout per cell in milliseconds |
+| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Examples:**
 ```
@@ -99,6 +108,9 @@ Insert a new code cell and immediately execute it. Combines `insert_cell` + `exe
 | `timeout` | number | No | `30000` | Execution timeout |
 | `max_images` | number | No | all | Maximum images to return |
 | `include_images` | boolean | No | `true` | Include images |
+| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution |
 
 **Example:**
@@ -122,6 +134,10 @@ Update a cell's source code and immediately execute it. Combines `update_cell` +
 | `timeout` | number | No | `30000` | Execution timeout |
 | `max_images` | number | No | all | Maximum images to return |
 | `include_images` | boolean | No | `true` | Include images |
+| `show_diff` | boolean | No | `false` | Include a diff of the source change |
+| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
+| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
+| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution |
 
 ---
