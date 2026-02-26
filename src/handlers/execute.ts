@@ -10,30 +10,22 @@ import {
   truncatedCellId,
   updateCellOutputs,
   buildExecutionContent,
-  generateUnifiedDiff,
-  truncateDiff,
   checkHumanFocus,
-  formatTimeRemaining,
   filterOutputText,
   type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
-import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode } from "../connection.js";
-import { recordChange } from "../cell-tracker.js";
-import { checkLock } from "../cell-locks.js";
+import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, cacheExecution, getCachedExecution } from "../connection.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "execute_cell": async (args) => {
-    const { path, index, cell_id, timeout, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
+    const { path, index, cell_id, timeout, max_images, include_images } = args as {
       path: string;
       index?: number;
       cell_id?: string;
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -62,6 +54,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const cell = cells.get(resolvedIndex) as Y.Map<any>;
+    const cellIdStr = getCellId(cell);
     const source = extractSource(cell);
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
     const result = await executeCode(session.kernelId, source, timeoutMs);
@@ -71,20 +64,19 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       updateCellOutputs(cell, result);
     }
 
-    return { content: buildExecutionContent(result, "", { max_images, include_images, max_output_lines, output_tail, output_grep }) };
+    const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: resolvedIndex, cellId: cellIdStr });
+    const content = buildExecutionContent(result, "", { max_images, include_images });
+    content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+    return { content };
   },
 
   "execute_code": async (args) => {
-    const { path, code, insertCell, timeout, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
+    const { path, code, timeout, max_images, include_images } = args as {
       path: string;
       code: string;
-      insertCell?: boolean;
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -97,224 +89,20 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-    const imgOpts = { max_images, include_images, max_output_lines, output_tail, output_grep };
-
-    if (insertCell) {
-      // Insert as a new cell and execute with visible outputs
-      const { doc } = await connectToNotebook(path, session.kernelId);
-      const cells = doc.getArray("cells");
-
-      // Create the cell
-      const newCell = new Y.Map();
-      newCell.set("cell_type", "code");
-      newCell.set("source", new Y.Text(code));
-      newCell.set("metadata", new Y.Map());
-      newCell.set("outputs", new Y.Array());
-      newCell.set("execution_count", null);
-      newCell.set("id", crypto.randomUUID());
-      cells.push([newCell]);
-
-      // Execute and update outputs
-      const result = await executeCode(session.kernelId, code, timeoutMs);
-      updateCellOutputs(newCell, result);
-
-      return { content: buildExecutionContent(result, `Cell inserted at index ${cells.length - 1}\n\nOutput:\n`, imgOpts) };
-    } else {
-      // Execute without inserting a cell
-      const result = await executeCode(session.kernelId, code, timeoutMs);
-      return { content: buildExecutionContent(result, "", imgOpts) };
-    }
-  },
-
-  "insert_and_execute": async (args) => {
-    const { path, index, cell_id, source, timeout, max_images, include_images, max_output_lines, output_tail, output_grep, client_name } = args as {
-      path: string;
-      index?: number;
-      cell_id?: string;
-      source: string;
-      timeout?: number;
-      max_images?: number;
-      include_images?: boolean;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
-      client_name?: string;
-    };
-    const clientId = client_name || "claude-code";
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      throw new Error(
-        `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
-      );
-    }
-
-    const { doc } = await connectToNotebook(path, session.kernelId);
-    const cells = doc.getArray("cells");
-
-    // Resolve cell_id to "insert after" position
-    let resolvedIndex = index;
-    if (cell_id !== undefined) {
-      if (index !== undefined) throw new Error("Specify either 'index' or 'cell_id', not both.");
-      resolvedIndex = resolveCellId(cells, cell_id) + 1; // insert after
-    }
-
-    // Create cell as Y.Map with Y.Text for source
-    const newCell = new Y.Map();
-    newCell.set("cell_type", "code");
-    newCell.set("source", new Y.Text(source));
-    newCell.set("metadata", new Y.Map());
-    newCell.set("outputs", new Y.Array());
-    newCell.set("execution_count", null);
-    const newCellId = crypto.randomUUID();
-    newCell.set("id", newCellId);
-
-    const insertIndex = resolvedIndex === undefined || resolvedIndex === -1 ? cells.length : resolvedIndex;
-    cells.insert(insertIndex, [newCell]);
-
-    recordChange(path, {
-      operation: "insert",
-      cellId: newCellId,
-      cellIdShort: newCellId.slice(0, 8),
-      cellIndex: insertIndex,
-      newSource: source,
-      client: clientId,
-    }, doc);
-
-    // Execute the cell
-    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-    const result = await executeCode(session.kernelId, source, timeoutMs);
-
-    // Update cell outputs in the notebook
-    updateCellOutputs(newCell, result);
-
-    const newId = newCellId.slice(0, 8);
-    return { content: buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images, max_output_lines, output_tail, output_grep }) };
-  },
-
-  "update_and_execute": async (args) => {
-    const { path, index, cell_id, source, force = false, timeout, max_images, include_images, show_diff = false, max_output_lines, output_tail, output_grep, client_name } = args as {
-      path: string;
-      index?: number;
-      cell_id?: string;
-      source: string;
-      force?: boolean;
-      timeout?: number;
-      max_images?: number;
-      include_images?: boolean;
-      show_diff?: boolean;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
-      client_name?: string;
-    };
-    const clientId = client_name || "claude-code";
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      throw new Error(
-        `No kernel found for notebook '${path}'. Make sure the notebook has an active kernel.`
-      );
-    }
-
-    const { doc, provider } = await connectToNotebook(path, session.kernelId);
-    const cells = doc.getArray("cells");
-
-    let resolvedIndex = index;
-    if (cell_id !== undefined) {
-      if (index !== undefined) throw new Error("Specify either 'index' or 'cell_id', not both.");
-      resolvedIndex = resolveCellId(cells, cell_id);
-    }
-    if (resolvedIndex === undefined) throw new Error("Either 'index' or 'cell_id' is required.");
-
-    if (resolvedIndex < 0 || resolvedIndex >= cells.length) {
-      throw new Error(
-        `Invalid cell index ${resolvedIndex}. Notebook has ${cells.length} cells.`
-      );
-    }
-
-    // Check human focus
-    if (!force) {
-      const focus = checkHumanFocus(provider, doc, resolvedIndex);
-      if (focus.blocked) {
-        const cellIdStr = truncatedCellId(cells.get(resolvedIndex) as any);
-        throw new Error(`Cannot modify cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} — user "${focus.user}" is currently editing it. Use force=true to override.`);
-      }
-    }
-
-    const cell = cells.get(resolvedIndex) as Y.Map<any>;
-
-    // Check advisory lock
-    let lockOverrideDetail: string | undefined;
-    const fullCellId = getCellId(cell) || "";
-    if (fullCellId) {
-      const lock = checkLock(path, fullCellId, clientId, doc);
-      if (lock) {
-        if (!force) {
-          const cellIdStr = truncatedCellId(cell);
-          throw new Error(`Cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} is locked by "${lock.owner}" (expires in ${formatTimeRemaining(Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000))}). Use force=true to override.`);
-        }
-        lockOverrideDetail = `force-overrode lock held by "${lock.owner}"`;
-      }
-    }
-
-    // Update the cell source
-    const oldSource = extractSource(cell);
-    if (cell instanceof Y.Map) {
-      const sourceField = cell.get("source");
-      if (sourceField instanceof Y.Text) {
-        sourceField.delete(0, sourceField.length);
-        sourceField.insert(0, source);
-      } else {
-        cell.set("source", new Y.Text(source));
-      }
-    }
-
-    recordChange(path, {
-      operation: "update",
-      cellId: getCellId(cell) || "",
-      cellIdShort: truncatedCellId(cell) || "",
-      cellIndex: resolvedIndex,
-      oldSource,
-      newSource: source,
-      client: clientId,
-      detail: lockOverrideDetail,
-    }, doc);
-
-    // Execute the cell
-    const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
-    const result = await executeCode(session.kernelId, source, timeoutMs);
-
-    // Update cell outputs in the notebook
-    if (cell instanceof Y.Map) {
-      updateCellOutputs(cell, result);
-    }
-
-    const cellIdStr = truncatedCellId(cell);
-    let prefix = `Updated and executed cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
-    if (show_diff) {
-      const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
-      prefix += `\n\n${truncateDiff(diff)}`;
-    }
-    prefix += "\n\nOutput:\n";
-
-    return { content: buildExecutionContent(result, prefix, { max_images, include_images, max_output_lines, output_tail, output_grep }) };
+    const result = await executeCode(session.kernelId, code, timeoutMs);
+    const executionId = cacheExecution(path, { text: result.text, images: result.images });
+    const content = buildExecutionContent(result, "", { max_images, include_images });
+    content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+    return { content };
   },
 
   "execute_range": async (args) => {
-    const { path, start_index, end_index, cell_ids, timeout, max_output_lines, output_tail, output_grep } = args as {
+    const { path, start_index, end_index, cell_ids, timeout } = args as {
       path: string;
       start_index?: number;
       end_index?: number;
       cell_ids?: string[];
       timeout?: number;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
     };
 
     const sessions = await listNotebookSessions();
@@ -372,8 +160,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         const result = await executeCode(session.kernelId, source, timeoutMs);
         updateCellOutputs(cell, result);
         const filteredOutput = result.text
-          ? filterOutputText(result.text, { max_output_lines: max_output_lines ?? 5, output_tail, output_grep }).text
+          ? filterOutputText(result.text, { max_output_lines: 5 }).text
           : undefined;
+        // Cache the full output for the last cell executed
+        cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
         results.push({
           index: i,
           cellId: cid,
@@ -387,12 +177,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const successCount = results.filter((r) => r.status === "ok").length;
     const errorCount = results.filter((r) => r.status === "error" || r.status.startsWith("error:")).length;
+    const lastCached = getCachedExecution(path);
 
     return {
       content: [
         {
           type: "text",
-          text: `Executed ${rangeLabel} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}`,
+          text: `Executed ${rangeLabel} in ${path}\n${successCount} succeeded, ${errorCount} failed\n\n${JSON.stringify(results, null, 2)}${lastCached ? `\n(execution_id: ${lastCached.executionId} — use filter_output to refine last cell output)` : ""}`,
         },
       ],
     };
@@ -517,7 +308,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "get_cell_outputs": async (args) => {
-    const { path, index, end_index, indices, cell_ids, max_images, include_images, max_output_lines, output_tail, output_grep } = args as {
+    const { path, index, end_index, indices, cell_ids, max_images, include_images } = args as {
       path: string;
       index?: number;
       end_index?: number;
@@ -525,9 +316,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       cell_ids?: string[];
       max_images?: number;
       include_images?: boolean;
-      max_output_lines?: number;
-      output_tail?: number;
-      output_grep?: string;
     };
 
     if (!isJupyterConnected()) {
@@ -569,9 +357,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           }
         }
 
-        let text = textParts.join("");
+        const fullText = textParts.join("");
+        let text = fullText;
         if (text) {
-          const filtered = filterOutputText(text, { max_output_lines, output_tail, output_grep });
+          // Cache full output for filter_output access
+          cacheExecution(path, { text: fullText, images: [], cellIndex: idx });
+          // Apply default truncation
+          const filtered = filterOutputText(text, {});
           text = filtered.text;
           if (filtered.note) text += `\n[${filtered.note}]`;
         }
@@ -648,9 +440,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
       }
 
-      let text = textParts.join("");
+      const fullText = textParts.join("");
+      let text = fullText;
       if (text) {
-        const filtered = filterOutputText(text, { max_output_lines, output_tail, output_grep });
+        // Cache full output for filter_output access
+        cacheExecution(path, { text: fullText, images, cellIndex: idx });
+        // Apply default truncation
+        const filtered = filterOutputText(text, {});
         text = filtered.text;
         if (filtered.note) text += `\n[${filtered.note}]`;
       }
@@ -683,6 +479,80 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       }
     } else if (images.length > 0) {
       content[0].text += `\n\n(${images.length} image${images.length === 1 ? "" : "s"} not shown — set include_images=true or increase max_images to see them)`;
+    }
+
+    return { content };
+  },
+
+  "filter_output": async (args) => {
+    const { path, execution_id, grep, tail, head, max_lines, max_images, include_images } = args as {
+      path: string;
+      execution_id?: string;
+      grep?: string;
+      tail?: number;
+      head?: number;
+      max_lines?: number;
+      max_images?: number;
+      include_images?: boolean;
+    };
+
+    const cached = getCachedExecution(path, execution_id);
+    if (!cached) {
+      const hint = execution_id
+        ? `No cached execution with ID '${execution_id}'.`
+        : `No cached execution for '${path}'.`;
+      return {
+        content: [{ type: "text", text: `${hint} Run execute_cell, execute_code, or execute_range first.` }],
+        isError: true,
+      };
+    }
+
+    let text = cached.text || "(no output)";
+
+    // Apply filters
+    if (grep || tail !== undefined || head !== undefined || max_lines !== undefined) {
+      // Build filter options
+      const filterOpts: OutputFilterOptions = {};
+      if (grep) filterOpts.output_grep = grep;
+      if (tail !== undefined) filterOpts.output_tail = tail;
+      if (max_lines !== undefined) filterOpts.max_output_lines = max_lines;
+      // For head: use max_output_lines with a high tail ratio
+      if (head !== undefined && tail === undefined && max_lines === undefined) {
+        // Just take first N lines
+        const lines = text.split("\n");
+        if (lines.length > head) {
+          text = lines.slice(0, head).join("\n");
+          text += `\n\n[showing first ${head} of ${lines.length} lines]`;
+        }
+      } else {
+        const filtered = filterOutputText(text, filterOpts);
+        text = filtered.text;
+        if (filtered.note) text += `\n\n[${filtered.note}]`;
+      }
+    }
+    // If no filters at all, return full text
+
+    const content: any[] = [{ type: "text", text: `Filtered output (execution ${cached.executionId}):\n\n${text}` }];
+
+    // Handle images
+    const effectiveInclude = include_images !== false;
+    const images = cached.images || [];
+    const effectiveMax = max_images ?? images.length;
+
+    if (effectiveInclude && images.length > 0) {
+      if (images.length > effectiveMax) {
+        const omitted = images.length - effectiveMax;
+        content[0].text += `\n\n(showing last ${effectiveMax} of ${images.length} images — ${omitted} omitted)`;
+        for (const img of images.slice(-effectiveMax)) {
+          content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        }
+      } else {
+        for (const img of images) {
+          content.push({ type: "image", data: img.data, mimeType: img.mimeType });
+        }
+      }
+    } else if (images.length > 0) {
+      content[0].text += `\n\n(${images.length} image${images.length === 1 ? "" : "s"} available — set include_images=true to see them)`;
     }
 
     return { content };

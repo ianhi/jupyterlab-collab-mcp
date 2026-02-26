@@ -13,7 +13,7 @@ These anti-patterns were discovered across four rounds of multi-agent testing. A
 |---------|--------------|-----|
 | Using `index` instead of `cell_id` | Indices shift when any cell is inserted or deleted | Read cell IDs from `get_notebook_content` and use `cell_id` on all subsequent calls |
 | Ignoring focus-blocked warnings | Overwriting a cell a human is editing leads to lost work | Move on to a different cell and come back later — or call `get_user_focus` proactively to check before writing |
-| Modifying cells without locking first | Another agent can overwrite your changes silently (last write wins) | `lock_cells` before editing; `unlock_cells` when done |
+| Modifying cells without locking first | Another agent can overwrite your changes silently (last write wins) | `cell_locks(action="acquire")` before editing; `cell_locks(action="release")` when done |
 | Not passing `client_name` | All changes attribute to `"claude-code"` — impossible to audit who did what | Pass `client_name="your-agent-name"` on every write call |
 | Using `batch_update_cells` during concurrent inserts | It takes `index` not `cell_id` — concurrent inserts shift indices | Lock the region first, or use individual `update_cell` calls with `cell_id` |
 | Reading the entire notebook with outputs | Large notebooks with images can blow out your context window | Use `cell_type="code"` (default), `include_outputs=false` (default), and `cell_ids` to read only what you need |
@@ -45,7 +45,7 @@ update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="...", client_name="my-a
 delete_cell(path="nb.ipynb", cell_id="a3f8c2d1", client_name="my-agent-name")
 ```
 
-Tools that accept `client_name`: `insert_cell`, `update_cell`, `delete_cell`, `insert_and_execute`, `update_and_execute`, `batch_update_cells`, `batch_insert_cells`, `copy_cells`, `move_cells`, `recover_cell`.
+Tools that accept `client_name`: `insert_cell`, `update_cell`, `delete_cell`, `batch_update_cells`, `batch_insert_cells`, `copy_cells`, `recover_cell`.
 
 ## Lock cells before modifying them
 
@@ -53,34 +53,34 @@ If other agents or humans might be working on the same notebook, lock the cells 
 
 ```
 # Claim your cells (default TTL: 10 minutes)
-lock_cells(path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="my-agent-name")
+cell_locks(action="acquire", path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="my-agent-name")
 
 # Work on them...
 update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="...", client_name="my-agent-name")
 
 # Release when done
-unlock_cells(path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="my-agent-name")
+cell_locks(action="release", path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"], owner="my-agent-name")
 ```
 
 - Lock owners can modify their own cells freely
 - Other agents get a warning and must use `force=true` to override
 - Locks auto-expire after 10 minutes (configurable via `ttl_minutes`)
-- Calling `lock_cells` again on cells you own renews the TTL
+- Calling `cell_locks(action="acquire")` again on cells you own renews the TTL
 
 ## Snapshot before risky operations
 
 Take a named snapshot before doing anything you might want to undo:
 
 ```
-snapshot_notebook(path="nb.ipynb", name="before-refactor")
+snapshot(action="save", path="nb.ipynb", name="before-refactor")
 
 # Do risky work...
 
 # If something goes wrong:
-restore_snapshot(path="nb.ipynb", name="before-refactor")
+snapshot(action="restore", path="nb.ipynb", name="before-refactor")
 ```
 
-`restore_snapshot` automatically saves a `pre-restore` backup, so you can't lose the current state.
+`snapshot(action="restore")` automatically saves a `pre-restore` backup, so you can't lose the current state.
 
 ## Check for human activity
 
@@ -111,14 +111,13 @@ Notebooks can be large. The server is designed to be stingy by default — outpu
 - When including outputs, `max_output_chars=500` truncates per cell (set 0 for unlimited)
 
 **Execution:**
-- Output is auto-truncated to 50 lines with a head/tail split (set `max_output_lines: 0` for unlimited)
-- Use `output_tail=20` to see only the last 20 lines (useful for training logs)
-- Use `output_grep="Error|Warning"` to filter output to only matching lines
+- Use `filter_output` to post-process execution output: `filter_output(path, index, tail=20)` for last 20 lines
+- Use `filter_output(path, index, grep="Error|Warning")` to filter output to only matching lines
 - Use `max_images=2` or `include_images=false` for plot-heavy cells
 
 **Editing:**
 - `insert_cell` and `batch_insert_cells` return compact confirmations (no diffs)
-- `update_and_execute` omits diffs by default (set `show_diff=true` if needed)
+- `update_cell` omits diffs by default (set `show_diff=true` if needed)
 
 ## Poll for changes from others
 
@@ -171,7 +170,7 @@ Before executing code, check that the kernel is ready:
 list_kernels()
 
 # Check if the kernel is idle (not still running a previous execution)
-get_kernel_status(path="nb.ipynb")
+kernel(action="status", path="nb.ipynb")
 ```
 
 ## Work with tags
@@ -180,7 +179,7 @@ Use tags to mark cells for specific treatment (e.g., `hide-input`, `parameters`,
 
 ```
 # Tag cells
-add_cell_tags(path="nb.ipynb", cell_ids=["a3f8c2d1"], tags=["parameters"])
+cell_tags(action="add", path="nb.ipynb", cell_ids=["a3f8c2d1"], tags=["parameters"])
 
 # Find tagged cells later
 find_cells_by_tag(path="nb.ipynb", tags=["parameters"])

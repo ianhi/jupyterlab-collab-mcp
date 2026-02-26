@@ -1,6 +1,6 @@
 ---
 title: Editing Tools
-description: Insert, update, delete, copy, move cells, and search-replace.
+description: Insert, update, delete, copy cells, and search-replace.
 ---
 
 Tools for modifying notebook cells. All editing tools support [cell ID addressing](../collaboration/#cell-id-addressing) and sync changes in real-time to the JupyterLab browser.
@@ -16,11 +16,19 @@ Insert a new cell into the notebook.
 | `index` | number | No | end | Position to insert (0 = beginning, -1 = end) |
 | `cell_id` | string | No | — | Insert after this cell ID (alternative to index) |
 | `cell_type` | `"code"` \| `"markdown"` | No | `"code"` | Cell type |
+| `execute` | boolean | No | `false` | Execute the cell immediately after inserting |
+| `timeout` | number | No | `30000` | Execution timeout (only when `execute=true`) |
+| `max_images` | number | No | all | Maximum images to return (only when `execute=true`) |
+| `include_images` | boolean | No | `true` | Include images (only when `execute=true`) |
 | `client_name` | string | No | `"claude-code"` | Agent name for change attribution |
 
-**Example:**
+**Examples:**
 ```
+# Insert a cell
 insert_cell(path="nb.ipynb", source="import pandas as pd", index=0)
+
+# Insert and execute in one operation
+insert_cell(path="nb.ipynb", source="print('hello')", index=0, execute=true)
 ```
 
 **Notes:**
@@ -39,15 +47,27 @@ Update the source code of an existing cell. Preserves outputs and metadata.
 | `index` | number | No | — | Cell index to update |
 | `cell_id` | string | No | — | Cell ID to update (alternative to index) |
 | `force` | boolean | No | `false` | Force update even if a human is editing |
+| `execute` | boolean | No | `false` | Execute the cell immediately after updating |
+| `show_diff` | boolean | No | `false` | Include a diff of the source change in the response |
+| `timeout` | number | No | `30000` | Execution timeout (only when `execute=true`) |
+| `max_images` | number | No | all | Maximum images to return (only when `execute=true`) |
+| `include_images` | boolean | No | `true` | Include images (only when `execute=true`) |
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution and lock matching |
 
-**Example:**
+**Examples:**
 ```
+# Update a cell
 update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="print('updated')")
+
+# Update and execute in one operation
+update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="print('updated')", execute=true)
+
+# Update with diff shown
+update_cell(path="nb.ipynb", cell_id="a3f8c2d1", source="print('updated')", show_diff=true)
 ```
 
 **Notes:**
-- Only modifies source, not metadata/tags (use `add_cell_tags`/`set_cell_metadata` for those)
+- Only modifies source, not metadata/tags (use `cell_tags`/`cell_metadata` for those)
 - Use `clear_outputs` to remove outputs
 - Checks [human-focus protection](../collaboration/#human-focus-protection) and [cell locks](../collaboration/#cell-locking)
 
@@ -108,32 +128,37 @@ batch_insert_cells(path="nb.ipynb", inserts=[
 
 ## delete_cell
 
-Delete a cell from the notebook.
+Delete one or more cells from the notebook. Supports single cell, multiple cells by index/ID, or ranges.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path |
 | `index` | number | No | — | Cell index to delete |
 | `cell_id` | string | No | — | Cell ID to delete (alternative to index) |
+| `indices` | number[] | No | — | Multiple cell indices to delete |
+| `cell_ids` | string[] | No | — | Multiple cell IDs to delete |
+| `start_index` | number | No | — | First cell index of range (inclusive) |
+| `end_index` | number | No | — | Last cell index of range (inclusive) |
 | `force` | boolean | No | `false` | Force delete even if human is editing |
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution |
 
+**Examples:**
+```
+# Delete a single cell
+delete_cell(path="nb.ipynb", cell_id="a3f8c2d1")
+
+# Delete multiple cells by index
+delete_cell(path="nb.ipynb", indices=[2, 5, 8])
+
+# Delete a range
+delete_cell(path="nb.ipynb", start_index=3, end_index=7)
+
+# Delete multiple cells by ID
+delete_cell(path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2"])
+```
+
 **Notes:**
 - Deleted cells can be recovered with [`recover_cell`](../collaboration/#recover_cell)
-
----
-
-## delete_cells
-
-Delete multiple cells at once.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `start_index` | number | No | — | First cell index (inclusive) |
-| `end_index` | number | No | — | Last cell index (inclusive) |
-| `indices` | number[] | No | — | Specific indices (overrides start/end) |
-| `cell_ids` | string[] | No | — | Cell IDs to delete (alternative to indices) |
 
 ---
 
@@ -153,45 +178,36 @@ Change a cell's type (code ↔ markdown) in place, preserving content.
 
 ## copy_cells
 
-Copy cells from one notebook to another (or within the same notebook).
+Copy or move cells within a notebook or between notebooks.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `source_path` | string | Yes | — | Source notebook path |
-| `dest_path` | string | Yes | — | Destination notebook path |
+| `dest_path` | string | Yes | — | Destination notebook path (can be same as source) |
 | `start_index` | number | No | — | First cell index to copy (inclusive) |
 | `end_index` | number | No | — | Last cell index to copy (inclusive) |
 | `cell_ids` | string[] | No | — | Cell IDs to copy (more robust in concurrent editing) |
 | `dest_index` | number | No | end | Position in destination |
 | `dest_cell_id` | string | No | — | Insert after this cell ID in destination |
+| `delete_source` | boolean | No | `false` | Delete source cells after copying (move operation) |
 | `client_name` | string | No | `"claude-code"` | Agent name for attribution |
 
-**Example:**
+**Examples:**
 ```
 # Copy cells 0-2 from data.ipynb to viz.ipynb
 copy_cells(source_path="data.ipynb", dest_path="viz.ipynb", start_index=0, end_index=2)
+
+# Move cells (copy + delete source)
+copy_cells(source_path="data.ipynb", dest_path="viz.ipynb", cell_ids=["a3f8c2d1"], delete_source=true)
+
+# Reorder cells within the same notebook
+copy_cells(source_path="nb.ipynb", dest_path="nb.ipynb", cell_ids=["a3f8c2d1"], dest_index=0, delete_source=true)
 ```
 
 **Notes:**
 - Returns new cell IDs for destination cells
 - For single cell, use same value for `start_index` and `end_index`
-
----
-
-## move_cells
-
-Move cells within a notebook (reorder) or between notebooks (removes from source).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `source_path` | string | Yes | — | Source notebook path |
-| `dest_path` | string | Yes | — | Destination (can be same as source) |
-| `start_index` | number | No | — | First cell index to move |
-| `end_index` | number | No | — | Last cell index to move |
-| `cell_ids` | string[] | No | — | Cell IDs to move |
-| `dest_index` | number | No | — | Position in destination |
-| `dest_cell_id` | string | No | — | Insert after this cell ID |
-| `client_name` | string | No | `"claude-code"` | Agent name for attribution |
+- Use `delete_source=true` instead of the old `move_cells` tool
 
 ---
 

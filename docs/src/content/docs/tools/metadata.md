@@ -5,57 +5,45 @@ description: Read and write cell/notebook metadata and manage cell tags.
 
 Tools for managing cell and notebook metadata. All cell-level tools support ranges (`index`/`end_index`), non-contiguous selection (`indices`), and cell ID selection (`cell_ids`).
 
-## get_cell_metadata
+## cell_metadata
 
-Get metadata from one or more cells. Returns `{index, metadata, tags}` with tags extracted to top level.
+Get or set cell metadata. Omit `metadata` to read; provide `metadata` to write (merges with existing).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path |
+| `metadata` | object | No | — | Metadata to set/merge. Omit to read. Use `null` values to delete keys |
 | `index` | number | No | — | Cell index (start of range if `end_index` set) |
 | `end_index` | number | No | — | Last cell index (inclusive) |
 | `indices` | number[] | No | — | Specific cell indices |
 | `cell_ids` | string[] | No | — | Cell IDs (alternative to indices) |
 
-**Example:**
+**Examples:**
 ```
-get_cell_metadata(path="nb.ipynb", indices=[0, 5, 10])
-```
+# Read metadata from specific cells
+cell_metadata(path="nb.ipynb", indices=[0, 5, 10])
 
----
-
-## set_cell_metadata
-
-Set metadata on one or more cells. Merges with existing metadata (use `null` values to delete keys).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `metadata` | object | Yes | — | Metadata to set/merge |
-| `index` | number | No | — | Cell index |
-| `end_index` | number | No | — | Last cell index (inclusive) |
-| `indices` | number[] | No | — | Specific cell indices |
-| `cell_ids` | string[] | No | — | Cell IDs |
-
-**Example:**
-```
 # Set metadata on specific cells
-set_cell_metadata(path="nb.ipynb", indices=[2, 4], metadata={"editable": false})
+cell_metadata(path="nb.ipynb", indices=[2, 4], metadata={"editable": false})
 
 # Delete a metadata key
-set_cell_metadata(path="nb.ipynb", index=0, metadata={"old_key": null})
+cell_metadata(path="nb.ipynb", index=0, metadata={"old_key": null})
 ```
+
+**Notes:**
+- When reading, returns `{index, metadata, tags}` with tags extracted to top level
 
 ---
 
-## add_cell_tags
+## cell_tags
 
-Add tags to one or more cells.
+Add or remove tags from one or more cells.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `action` | `"add"` \| `"remove"` | Yes | — | Whether to add or remove tags |
 | `path` | string | Yes | — | Notebook path |
-| `tags` | string[] | Yes | — | Tags to add |
+| `tags` | string[] | Yes | — | Tags to add or remove |
 | `index` | number | No | — | Cell index |
 | `end_index` | number | No | — | Last cell index (inclusive) |
 | `indices` | number[] | No | — | Specific cell indices |
@@ -63,26 +51,14 @@ Add tags to one or more cells.
 
 **Common tags:** `hide-input`, `hide-output`, `remove-input`, `remove-output`, `remove-cell`, `skip-execution`, `parameters` (papermill).
 
-**Example:**
+**Examples:**
 ```
-# Hide input on multiple non-contiguous cells
-add_cell_tags(path="nb.ipynb", indices=[2, 4, 6, 8], tags=["hide-input"])
+# Add tags to multiple non-contiguous cells
+cell_tags(action="add", path="nb.ipynb", indices=[2, 4, 6, 8], tags=["hide-input"])
+
+# Remove tags
+cell_tags(action="remove", path="nb.ipynb", cell_ids=["a3f8c2d1"], tags=["hide-input"])
 ```
-
----
-
-## remove_cell_tags
-
-Remove tags from one or more cells.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `tags` | string[] | Yes | — | Tags to remove |
-| `index` | number | No | — | Cell index |
-| `end_index` | number | No | — | Last cell index (inclusive) |
-| `indices` | number[] | No | — | Specific cell indices |
-| `cell_ids` | string[] | No | — | Cell IDs |
 
 ---
 
@@ -104,21 +80,20 @@ find_cells_by_tag(path="nb.ipynb", tags=["parameters"], include_preview=true)
 
 ---
 
-## get_notebook_metadata
+## notebook_metadata
 
-Get notebook-level metadata (kernelspec, language_info, custom fields).
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `path` | string | Yes | Notebook path |
-
----
-
-## set_notebook_metadata
-
-Set notebook-level metadata. Merges with existing metadata.
+Get or set notebook-level metadata (kernelspec, language_info, custom fields). Omit `metadata` to read; provide `metadata` to write (merges with existing).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `path` | string | Yes | Notebook path |
-| `metadata` | object | Yes | Metadata to set/merge |
+| `metadata` | object | No | Metadata to set/merge. Omit to read |
+
+**Examples:**
+```
+# Read notebook metadata
+notebook_metadata(path="nb.ipynb")
+
+# Set notebook metadata
+notebook_metadata(path="nb.ipynb", metadata={"custom_field": "value"})
+```

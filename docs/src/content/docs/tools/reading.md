@@ -56,7 +56,7 @@ get_notebook_outline(path="analysis.ipynb")
 ```
 
 **Notes:**
-- Useful for navigating large notebooks before using `update_cell` or `add_cell_tags`
+- Useful for navigating large notebooks before using `update_cell` or `cell_tags`
 - Shows markdown headers by level (H1, H2, etc.) and first line of code cells
 
 ---
@@ -98,9 +98,6 @@ Get execution outputs from specific cells without fetching source code.
 | `cell_ids` | string[] | No | — | Cell IDs (alternative to indices) |
 | `max_images` | number | No | all | Maximum images to return (shows last N) |
 | `include_images` | boolean | No | `true` | Include images in response |
-| `max_output_lines` | number | No | `50` | Max output lines per cell. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines per cell. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Example:**
 ```

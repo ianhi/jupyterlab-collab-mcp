@@ -1,9 +1,9 @@
 ---
 title: Tool Overview
-description: All 55 MCP tools organized by category.
+description: All 41 MCP tools organized by category.
 ---
 
-The MCP server provides 55 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
+The MCP server provides 41 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
 
 ## Categories
 
@@ -14,10 +14,10 @@ Connect to JupyterLab, discover files and notebooks, open and create notebooks.
 Read notebook content with filtering, get outlines, search/grep, fetch outputs.
 
 ### [Editing](./editing/)
-Insert, update, delete, copy, move cells. Batch operations and search-replace.
+Insert, update, delete, copy cells. Batch operations and search-replace.
 
 ### [Execution](./execution/)
-Execute cells and code, run ranges, combo insert+execute and update+execute, clear outputs.
+Execute cells and code, run ranges, filter output, clear outputs.
 
 ### [Collaboration](./collaboration/)
 Cell IDs, human-focus protection, advisory locking, change tracking, snapshots.
@@ -42,45 +42,31 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `get_notebook_outline` | Reading | Condensed structure view |
 | `search_notebook` | Reading | Grep through cells |
 | `get_cell_outputs` | Reading | Get outputs without source |
-| `insert_cell` | Editing | Insert a cell |
-| `update_cell` | Editing | Update cell source |
+| `insert_cell` | Editing | Insert a cell (optionally execute with `execute=true`) |
+| `update_cell` | Editing | Update cell source (optionally execute with `execute=true`) |
 | `batch_update_cells` | Editing | Update multiple cells atomically |
 | `batch_insert_cells` | Editing | Insert multiple cells at once |
-| `delete_cell` | Editing | Delete a cell |
-| `delete_cells` | Editing | Delete multiple cells |
+| `delete_cell` | Editing | Delete one or more cells (supports `indices`, `cell_ids`, ranges) |
 | `change_cell_type` | Editing | Convert code ↔ markdown |
-| `copy_cells` | Editing | Copy cells within/between notebooks |
-| `move_cells` | Editing | Move/reorder cells |
+| `copy_cells` | Editing | Copy/move cells within/between notebooks (`delete_source=true` to move) |
 | `replace_in_notebook` | Editing | Search and replace across cells |
 | `execute_cell` | Execution | Run a cell |
 | `execute_code` | Execution | Run code without modifying notebook |
 | `execute_range` | Execution | Run multiple cells in sequence |
-| `insert_and_execute` | Execution | Insert + run in one operation |
-| `update_and_execute` | Execution | Update + run in one operation |
+| `filter_output` | Execution | Post-process cached execution output (grep, tail, head, max_lines) |
 | `clear_outputs` | Execution | Clear cell outputs |
 | `get_user_focus` | Collaboration | See user's current cell |
-| `lock_cells` | Collaboration | Acquire advisory locks |
-| `unlock_cells` | Collaboration | Release locks |
-| `list_locks` | Collaboration | List active locks |
+| `cell_locks` | Collaboration | Acquire, release, or list advisory cell locks |
 | `get_cell_history` | Collaboration | View cell change log |
 | `get_notebook_changes` | Collaboration | Poll for changes |
 | `recover_cell` | Collaboration | Re-insert deleted cell |
-| `snapshot_notebook` | Collaboration | Save named checkpoint |
-| `restore_snapshot` | Collaboration | Restore to checkpoint |
-| `list_snapshots` | Collaboration | List checkpoints |
-| `diff_snapshot` | Collaboration | Compare checkpoint vs current |
-| `get_cell_metadata` | Metadata | Get cell metadata/tags |
-| `set_cell_metadata` | Metadata | Set cell metadata |
-| `add_cell_tags` | Metadata | Add tags to cells |
-| `remove_cell_tags` | Metadata | Remove tags from cells |
+| `snapshot` | Collaboration | Save, restore, list, or diff named checkpoints |
+| `cell_metadata` | Metadata | Get or set cell metadata |
+| `cell_tags` | Metadata | Add or remove cell tags |
 | `find_cells_by_tag` | Metadata | Find cells by tag |
-| `get_notebook_metadata` | Metadata | Get notebook metadata |
-| `set_notebook_metadata` | Metadata | Set notebook metadata |
-| `get_kernel_status` | Kernel | Check kernel status |
-| `get_kernel_variables` | Kernel | List kernel variables with detail levels |
-| `inspect_variable` | Kernel | Deep-inspect variables (columns, dtypes, shapes) |
-| `interrupt_kernel` | Kernel | Stop running execution |
-| `restart_kernel` | Kernel | Restart kernel |
+| `notebook_metadata` | Metadata | Get or set notebook metadata |
+| `kernel` | Kernel | Check status, interrupt, or restart kernel |
+| `kernel_variables` | Kernel | List or inspect kernel variables |
 | `get_diagnostics` | Kernel | Get errors/warnings |
 | `get_hover_info` | Kernel | Get docs/type info |
 | `rename_symbol` | Kernel | Scope-aware rename |

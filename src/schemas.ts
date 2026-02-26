@@ -160,7 +160,7 @@ export const toolSchemas = [
   {
     name: "get_notebook_outline",
     description:
-      "Get a condensed outline of the notebook structure. Returns cell indices with markdown headers (by level) and first line preview of code cells. Useful for navigating and finding cell indices before using update_cell or add_cell_tags.",
+      "Get a condensed outline of the notebook structure. Returns cell indices with markdown headers (by level) and first line preview of code cells. Useful for navigating and finding cell indices before using update_cell or cell_tags.",
     inputSchema: {
       type: "object",
       properties: {
@@ -175,7 +175,7 @@ export const toolSchemas = [
   {
     name: "search_notebook",
     description:
-      "Search/grep through notebook cells for a pattern (regex supported). Returns matching cell indices and content. Use to find cell indices before update_cell or add_cell_tags.",
+      "Search/grep through notebook cells for a pattern (regex supported). Returns matching cell indices and content. Use to find cell indices before update_cell or cell_tags.",
     inputSchema: {
       type: "object",
       properties: {
@@ -352,7 +352,7 @@ export const toolSchemas = [
   {
     name: "insert_cell",
     description:
-      "Insert a new cell into the notebook. Changes sync in real-time to JupyterLab browser. Returns a diff showing what was inserted.",
+      "Insert a new cell into the notebook. Set execute=true to immediately execute (requires JupyterLab connection). Changes sync in real-time.",
     inputSchema: {
       type: "object",
       properties: {
@@ -378,6 +378,22 @@ export const toolSchemas = [
           enum: ["code", "markdown"],
           description: "Cell type (default: code)",
         },
+        execute: {
+          type: "boolean",
+          description: "Execute the cell after inserting. Requires JupyterLab connection. Default: false",
+        },
+        timeout: {
+          type: "number",
+          description: "Execution timeout in milliseconds (only with execute=true). Default: 30000. Max: 300000.",
+        },
+        max_images: {
+          type: "number",
+          description: "Maximum images to return when execute=true. Default: all.",
+        },
+        include_images: {
+          type: "boolean",
+          description: "Include images when execute=true. Default: true",
+        },
         client_name: {
           type: "string",
           description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
@@ -388,7 +404,7 @@ export const toolSchemas = [
   },
   {
     name: "update_cell",
-    description: "Update the source code of an existing cell. Only modifies source, not metadata/tags (use add_cell_tags/set_cell_metadata for those). Preserves cell outputs; use clear_outputs to remove them. Changes sync in real-time to JupyterLab.",
+    description: "Update the source code of an existing cell. Set execute=true to immediately execute after updating. Only modifies source, not metadata/tags.",
     inputSchema: {
       type: "object",
       properties: {
@@ -411,6 +427,26 @@ export const toolSchemas = [
         force: {
           type: "boolean",
           description: "Force update even if a human is editing this cell. Default: false",
+        },
+        execute: {
+          type: "boolean",
+          description: "Execute the cell after updating. Requires JupyterLab connection. Default: false",
+        },
+        timeout: {
+          type: "number",
+          description: "Execution timeout in milliseconds (only with execute=true). Default: 30000. Max: 300000.",
+        },
+        max_images: {
+          type: "number",
+          description: "Maximum images to return when execute=true. Default: all.",
+        },
+        include_images: {
+          type: "boolean",
+          description: "Include images when execute=true. Default: true",
+        },
+        show_diff: {
+          type: "boolean",
+          description: "Include a diff of the source change in response. Default: false",
         },
         client_name: {
           type: "string",
@@ -496,7 +532,7 @@ export const toolSchemas = [
   },
   {
     name: "delete_cell",
-    description: "Delete a cell from the notebook. Changes sync in real-time to JupyterLab browser. Returns a diff showing what was deleted.",
+    description: "Delete one or more cells from the notebook. For single cell: use index or cell_id. For multiple: use indices[], cell_ids[], or start_index+end_index range.",
     inputSchema: {
       type: "object",
       properties: {
@@ -512,6 +548,24 @@ export const toolSchemas = [
           type: "string",
           description: "Cell ID to delete (alternative to index). Use the ID shown in get_notebook_content output.",
         },
+        indices: {
+          type: "array",
+          items: { type: "number" },
+          description: "Delete multiple cells by index (e.g., [2,5,8]). Takes precedence over index/cell_id.",
+        },
+        cell_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Delete multiple cells by ID. Takes precedence over index/cell_id.",
+        },
+        start_index: {
+          type: "number",
+          description: "First cell index to delete when deleting a range (inclusive).",
+        },
+        end_index: {
+          type: "number",
+          description: "Last cell index to delete when deleting a range (inclusive).",
+        },
         force: {
           type: "boolean",
           description: "Force delete even if a human is editing this cell. Default: false",
@@ -519,40 +573,6 @@ export const toolSchemas = [
         client_name: {
           type: "string",
           description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'etl-agent'). Default: 'claude-code'",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "delete_cells",
-    description:
-      "Delete multiple cells at once. More efficient than calling delete_cell repeatedly.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        start_index: {
-          type: "number",
-          description: "First cell index to delete (inclusive)",
-        },
-        end_index: {
-          type: "number",
-          description: "Last cell index to delete (inclusive)",
-        },
-        indices: {
-          type: "array",
-          items: { type: "number" },
-          description:
-            "Specific cell indices to delete (e.g., [2,5,8]). Takes precedence over start_index/end_index.",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "Cell IDs to delete (alternative to indices). Use IDs shown in get_notebook_content output.",
         },
       },
       required: ["path"],
@@ -593,7 +613,7 @@ export const toolSchemas = [
   {
     name: "copy_cells",
     description:
-      "Copy one or more cells from one notebook to another (or within the same notebook). For single cell, use same value for start_index and end_index.",
+      "Copy (or move) cells between notebooks or within the same notebook. Set delete_source=true to move instead of copy.",
     inputSchema: {
       type: "object",
       properties: {
@@ -628,52 +648,9 @@ export const toolSchemas = [
           description:
             "Insert after this cell ID in destination (alternative to dest_index).",
         },
-        client_name: {
-          type: "string",
-          description:
-            "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
-        },
-      },
-      required: ["source_path", "dest_path"],
-    },
-  },
-  {
-    name: "move_cells",
-    description:
-      "Move one or more cells within a notebook (reorder) or between notebooks (removes from source). For single cell, use same value for start_index and end_index.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        source_path: {
-          type: "string",
-          description: "Source notebook path",
-        },
-        dest_path: {
-          type: "string",
-          description: "Destination notebook path (can be same as source for reordering)",
-        },
-        start_index: {
-          type: "number",
-          description: "First cell index to move (inclusive)",
-        },
-        end_index: {
-          type: "number",
-          description: "Last cell index to move (inclusive)",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Cell IDs to move (alternative to start_index/end_index). More robust in concurrent editing.",
-        },
-        dest_index: {
-          type: "number",
-          description: "Position in destination to insert cells",
-        },
-        dest_cell_id: {
-          type: "string",
-          description:
-            "Insert after this cell ID in destination (alternative to dest_index).",
+        delete_source: {
+          type: "boolean",
+          description: "Delete source cells after copying (move operation). Default: false",
         },
         client_name: {
           type: "string",
@@ -715,18 +692,6 @@ export const toolSchemas = [
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
         },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output. Overrides max_output_lines.",
-        },
-        output_grep: {
-          type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
-        },
       },
       required: ["path"],
     },
@@ -734,7 +699,7 @@ export const toolSchemas = [
   {
     name: "execute_code",
     description:
-      "Execute code in the notebook's kernel without modifying the notebook. Requires JupyterLab connection. Works with any kernel (Python, R, Julia, etc.). Set insertCell=true to also add the code as a new cell with visible outputs.",
+      "Execute code in the notebook's kernel without modifying the notebook. Requires JupyterLab connection. Use insert_cell(execute=true) to also add the code as a cell.",
     inputSchema: {
       type: "object",
       properties: {
@@ -745,11 +710,6 @@ export const toolSchemas = [
         code: {
           type: "string",
           description: "Code to execute (language depends on notebook's kernel)",
-        },
-        insertCell: {
-          type: "boolean",
-          description:
-            "If true, insert code as a new cell and show outputs in JupyterLab (default: false)",
         },
         timeout: {
           type: "number",
@@ -762,18 +722,6 @@ export const toolSchemas = [
         include_images: {
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
-        },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output. Overrides max_output_lines.",
-        },
-        output_grep: {
-          type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
         },
       },
       required: ["path", "code"],
@@ -808,138 +756,8 @@ export const toolSchemas = [
           type: "number",
           description: "Timeout per cell in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
         },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines per cell (default 50). Head/tail split. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output per cell. Overrides max_output_lines.",
-        },
-        output_grep: {
-          type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
-        },
       },
       required: ["path"],
-    },
-  },
-  {
-    name: "insert_and_execute",
-    description:
-      "Insert a new code cell and immediately execute it. Requires JupyterLab connection. Combines insert_cell + execute_cell in one operation. Returns the execution output.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        index: {
-          type: "number",
-          description: "Position to insert (0 = beginning, -1 or omit = end)",
-        },
-        cell_id: {
-          type: "string",
-          description: "Insert after the cell with this ID (alternative to index). Use the ID shown in get_notebook_content output.",
-        },
-        source: {
-          type: "string",
-          description: "Code to insert and execute",
-        },
-        timeout: {
-          type: "number",
-          description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
-        },
-        max_images: {
-          type: "number",
-          description: "Maximum number of images to return. When exceeded, shows last N images. Default: all images.",
-        },
-        include_images: {
-          type: "boolean",
-          description: "Whether to include images in the response. Set to false for text-only output. Default: true",
-        },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output. Overrides max_output_lines.",
-        },
-        output_grep: {
-          type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
-        },
-        client_name: {
-          type: "string",
-          description: "Optional agent/client name for change attribution (e.g., 'etl-agent'). Default: 'claude-code'",
-        },
-      },
-      required: ["path", "source"],
-    },
-  },
-  {
-    name: "update_and_execute",
-    description:
-      "Update a cell's source code and immediately execute it. Requires JupyterLab connection. Combines update_cell + execute_cell in one operation. Returns the execution output.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        index: {
-          type: "number",
-          description: "Cell index to update and execute",
-        },
-        cell_id: {
-          type: "string",
-          description: "Cell ID to update and execute (alternative to index). Use the ID shown in get_notebook_content output.",
-        },
-        source: {
-          type: "string",
-          description: "New source code for the cell",
-        },
-        force: {
-          type: "boolean",
-          description: "Force update even if a human is editing this cell. Default: false",
-        },
-        timeout: {
-          type: "number",
-          description: "Execution timeout in milliseconds. Default: 30000 (30s). Max: 300000 (5min).",
-        },
-        max_images: {
-          type: "number",
-          description: "Maximum number of images to return. When exceeded, shows last N images. Default: all images.",
-        },
-        include_images: {
-          type: "boolean",
-          description: "Whether to include images in the response. Set to false for text-only output. Default: true",
-        },
-        show_diff: {
-          type: "boolean",
-          description: "Include a diff of the source change. Default: false",
-        },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines (default 50). Head/tail split with omission note. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output. Overrides max_output_lines.",
-        },
-        output_grep: {
-          type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
-        },
-        client_name: {
-          type: "string",
-          description: "Optional agent/client name for change attribution and lock owner matching (e.g., 'model-agent'). Default: 'claude-code'",
-        },
-      },
-      required: ["path", "source"],
     },
   },
   {
@@ -1006,26 +824,56 @@ export const toolSchemas = [
           type: "boolean",
           description: "Whether to include images in the response. Set to false for text-only output. Default: true",
         },
-        max_output_lines: {
-          type: "number",
-          description: "Max output lines per cell (default 50). Head/tail split. Set 0 for unlimited.",
-        },
-        output_tail: {
-          type: "number",
-          description: "Show only last N lines of output per cell. Overrides max_output_lines.",
-        },
-        output_grep: {
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "filter_output",
+    description:
+      "Filter cached execution output. Operates on the full output from the most recent execution on a notebook. Use after execute_cell/execute_code/execute_range to grep, tail, or paginate through long output without re-executing. Unix pipe model: execute first, then filter.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
           type: "string",
-          description: "Regex filter — only include output lines matching this pattern.",
+          description: "Notebook path (to identify cached output)",
+        },
+        execution_id: {
+          type: "string",
+          description: "Target a specific execution by ID (shown in execute tool responses). If omitted, uses the most recent execution for this path.",
+        },
+        grep: {
+          type: "string",
+          description: "Regex filter — only include lines matching this pattern.",
+        },
+        tail: {
+          type: "number",
+          description: "Show only last N lines.",
+        },
+        head: {
+          type: "number",
+          description: "Show only first N lines.",
+        },
+        max_lines: {
+          type: "number",
+          description: "Max lines with head/tail split (like default truncation). Set 0 for unlimited.",
+        },
+        max_images: {
+          type: "number",
+          description: "Maximum number of images to return.",
+        },
+        include_images: {
+          type: "boolean",
+          description: "Include images in response. Default: true",
         },
       },
       required: ["path"],
     },
   },
   {
-    name: "get_cell_metadata",
-    description:
-      "Get metadata from one or more cells. Returns {index, metadata, tags} - tags extracted to top level for convenience. Use indices:[2,5,8] for non-contiguous cells.",
+    name: "cell_metadata",
+    description: "Get or set metadata on cells. Omit 'metadata' to GET, provide 'metadata' to SET (merges with existing, use null values to delete keys).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1035,67 +883,33 @@ export const toolSchemas = [
         },
         index: {
           type: "number",
-          description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
+          description: "Cell index. If end_index provided, start of range.",
         },
         end_index: {
           type: "number",
-          description: "Last cell index (inclusive). Omit for single cell.",
+          description: "Last cell index (inclusive).",
         },
         indices: {
           type: "array",
           items: { type: "number" },
-          description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
+          description: "Specific cell indices.",
         },
         cell_ids: {
           type: "array",
           items: { type: "string" },
-          description: "Cell IDs to get metadata for (alternative to indices). Use IDs shown in get_notebook_content output.",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "set_cell_metadata",
-    description:
-      "Set metadata on one or more cells. Merges with existing metadata (use null values to delete keys). Supports ranges or specific non-contiguous indices.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        index: {
-          type: "number",
-          description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
-        },
-        end_index: {
-          type: "number",
-          description: "Last cell index (inclusive). Omit for single cell.",
-        },
-        indices: {
-          type: "array",
-          items: { type: "number" },
-          description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "Cell IDs to set metadata on (alternative to indices). Use IDs shown in get_notebook_content output.",
+          description: "Cell IDs (prefix match).",
         },
         metadata: {
           type: "object",
-          description: "Metadata to set/merge. Use null values to delete keys.",
+          description: "Metadata to set/merge. Omit to GET. Use null values to delete keys.",
         },
       },
-      required: ["path", "metadata"],
+      required: ["path"],
     },
   },
   {
-    name: "add_cell_tags",
-    description:
-      "Add tags to one or more cells. Common tags: 'hide-input', 'hide-output', 'remove-input', 'remove-output', 'remove-cell', 'skip-execution', 'parameters' (papermill). Use indices:[2,5,8] for non-contiguous cells.",
+    name: "cell_tags",
+    description: "Add or remove tags on cells. Common tags: 'hide-input', 'hide-output', 'parameters' (papermill).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1103,69 +917,36 @@ export const toolSchemas = [
           type: "string",
           description: "Notebook path",
         },
-        index: {
-          type: "number",
-          description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
-        },
-        end_index: {
-          type: "number",
-          description: "Last cell index (inclusive). Omit for single cell.",
-        },
-        indices: {
-          type: "array",
-          items: { type: "number" },
-          description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "Cell IDs to add tags to (alternative to indices). Use IDs shown in get_notebook_content output.",
-        },
-        tags: {
-          type: "array",
-          items: { type: "string" },
-          description: "Tags to add",
-        },
-      },
-      required: ["path", "tags"],
-    },
-  },
-  {
-    name: "remove_cell_tags",
-    description:
-      "Remove tags from one or more cells. Supports ranges or specific non-contiguous indices.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
+        action: {
           type: "string",
-          description: "Notebook path",
+          enum: ["add", "remove"],
+          description: "Whether to add or remove the specified tags.",
         },
         index: {
           type: "number",
-          description: "Cell index. If end_index provided, start of range. Ignored if indices is set.",
+          description: "Cell index. If end_index provided, start of range.",
         },
         end_index: {
           type: "number",
-          description: "Last cell index (inclusive). Omit for single cell.",
+          description: "Last cell index (inclusive).",
         },
         indices: {
           type: "array",
           items: { type: "number" },
-          description: "Specific cell indices (e.g., [2,4,6,8]). Takes precedence over index/end_index.",
+          description: "Specific cell indices.",
         },
         cell_ids: {
           type: "array",
           items: { type: "string" },
-          description: "Cell IDs to remove tags from (alternative to indices). Use IDs shown in get_notebook_content output.",
+          description: "Cell IDs (prefix match).",
         },
         tags: {
           type: "array",
           items: { type: "string" },
-          description: "Tags to remove",
+          description: "Tags to add or remove.",
         },
       },
-      required: ["path", "tags"],
+      required: ["path", "action", "tags"],
     },
   },
   {
@@ -1197,24 +978,8 @@ export const toolSchemas = [
     },
   },
   {
-    name: "get_notebook_metadata",
-    description:
-      "Get notebook-level metadata (kernelspec, language_info, custom fields).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "set_notebook_metadata",
-    description:
-      "Set notebook-level metadata. Merges with existing metadata.",
+    name: "notebook_metadata",
+    description: "Get or set notebook-level metadata (kernelspec, language_info, custom fields). Omit 'metadata' to GET, provide to SET (merges with existing).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1224,31 +989,27 @@ export const toolSchemas = [
         },
         metadata: {
           type: "object",
-          description: "Metadata to set/merge",
-        },
-      },
-      required: ["path", "metadata"],
-    },
-  },
-  {
-    name: "get_kernel_status",
-    description:
-      "Get the status of a notebook's kernel (idle, busy, starting, dead). Requires JupyterLab connection. Use to check if execution is complete or if kernel needs restart.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
+          description: "Metadata to set/merge. Omit to GET. Use null values to delete keys.",
         },
       },
       required: ["path"],
     },
   },
   {
-    name: "get_kernel_variables",
-    description:
-      "List variables defined in the notebook's kernel. Requires JupyterLab connection. Returns variable names, types, and short representations. Useful for inspecting kernel state without writing code.",
+    name: "kernel",
+    description: "Manage notebook kernel. Actions: 'status' to check state, 'interrupt' to stop execution, 'restart' to clear all state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Notebook path" },
+        action: { type: "string", enum: ["status", "interrupt", "restart"], description: "Kernel operation." },
+      },
+      required: ["path", "action"],
+    },
+  },
+  {
+    name: "kernel_variables",
+    description: "List or inspect variables in the notebook's kernel. Without 'names': lists all variables with name/type/repr. With 'names': deep inspection with columns, dtypes, shapes, keys.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1256,11 +1017,16 @@ export const toolSchemas = [
           type: "string",
           description: "Notebook path",
         },
+        names: {
+          type: "array",
+          items: { type: "string" },
+          description: "Variable names to inspect in detail (max 20). When provided, returns deep structural metadata instead of listing all variables.",
+        },
         detail: {
           type: "string",
           enum: ["basic", "schema", "full"],
           description:
-            "Detail level. 'basic' (default): name, type, repr. 'schema': one-line summaries with column/dtype info. 'full': structured inspection dicts.",
+            "Detail level for listing (ignored when names provided). 'basic' (default): name, type, repr. 'schema': one-line summaries with column/dtype info. 'full': structured inspection dicts.",
         },
         filter: {
           type: "string",
@@ -1284,67 +1050,6 @@ export const toolSchemas = [
           type: ["number", "null"],
           description:
             "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "inspect_variable",
-    description:
-      "Inspect specific variables in the notebook's kernel with full structural metadata. Returns columns, dtypes, shapes, keys, and nested structure for DataFrames, arrays, dicts, and other types. Use get_kernel_variables first to discover variable names, then inspect_variable for details.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        names: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Variable names to inspect (max 20). Must be valid Python identifiers.",
-        },
-        max_items: {
-          type: "number",
-          description:
-            "Maximum number of columns/keys/elements to enumerate per variable. Default: 20",
-        },
-        max_name_length: {
-          type: ["number", "null"],
-          description:
-            "Maximum characters for column/key/variable names. Default: 60. Use null for unlimited (may use more context).",
-        },
-      },
-      required: ["path", "names"],
-    },
-  },
-  {
-    name: "interrupt_kernel",
-    description:
-      "Interrupt (stop) a running execution. Requires JupyterLab connection. Use when code is taking too long or stuck in an infinite loop. Does not restart the kernel or clear state.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "restart_kernel",
-    description:
-      "Restart the kernel, clearing all variables and state. Requires JupyterLab connection. Use when kernel is unresponsive, memory is full, or you need a clean slate. All variables will be lost.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
         },
       },
       required: ["path"],
@@ -1480,152 +1185,36 @@ export const toolSchemas = [
   // Snapshot tools
   // ========================================================================
   {
-    name: "snapshot_notebook",
-    description:
-      "Save a named snapshot of the notebook's current state. Captures all cell content, types, and metadata. Use before risky operations or to create a known-good checkpoint for recovery.",
+    name: "snapshot",
+    description: "Manage notebook snapshots. Actions: 'save' to create checkpoint, 'restore' to revert, 'list' to show all, 'diff' to compare against current.",
     inputSchema: {
       type: "object",
       properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        name: {
-          type: "string",
-          description: "Name for this snapshot (e.g., 'before-refactor', 'v1-working')",
-        },
-        description: {
-          type: "string",
-          description: "Optional description of what state this captures",
-        },
+        path: { type: "string", description: "Notebook path" },
+        action: { type: "string", enum: ["save", "restore", "list", "diff"], description: "Snapshot operation." },
+        name: { type: "string", description: "Snapshot name (required for save/restore/diff)." },
+        description: { type: "string", description: "Description of what state this captures (save only)." },
       },
-      required: ["path", "name"],
-    },
-  },
-  {
-    name: "restore_snapshot",
-    description:
-      "Restore a notebook to a previously saved snapshot. WARNING: This replaces ALL cells in the notebook with the snapshot's cells. Outputs are cleared. Creates an automatic 'pre-restore' snapshot first for safety.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        name: {
-          type: "string",
-          description: "Name of the snapshot to restore",
-        },
-      },
-      required: ["path", "name"],
-    },
-  },
-  {
-    name: "list_snapshots",
-    description:
-      "List all saved snapshots for a notebook. Shows name, creation time, cell count, and description.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    name: "diff_snapshot",
-    description:
-      "Compare a saved snapshot against the notebook's current state. Shows which cells were added, deleted, modified, or unchanged since the snapshot was taken.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        name: {
-          type: "string",
-          description: "Name of the snapshot to compare against",
-        },
-      },
-      required: ["path", "name"],
+      required: ["path", "action"],
     },
   },
   // ================================================================
   // Cell locking tools
   // ================================================================
   {
-    name: "lock_cells",
-    description:
-      "Acquire advisory locks on cells to prevent accidental overwrites by other agents. Locks auto-expire after 10 minutes (configurable). Calling again with the same owner renews the lock TTL. Other agents see a warning when trying to modify locked cells.",
+    name: "cell_locks",
+    description: "Manage advisory cell locks. Actions: 'acquire' to lock, 'release' to unlock, 'list' to show active locks.",
     inputSchema: {
       type: "object",
       properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "Cell IDs to lock (prefix match supported)",
-        },
-        owner: {
-          type: "string",
-          description: "Who is claiming these cells (e.g. agent name). Default: 'claude-code'",
-        },
-        ttl_minutes: {
-          type: "number",
-          description: "Lock duration in minutes. Default: 10",
-        },
+        path: { type: "string", description: "Notebook path" },
+        action: { type: "string", enum: ["acquire", "release", "list"], description: "Lock operation to perform." },
+        cell_ids: { type: "array", items: { type: "string" }, description: "Cell IDs to lock/unlock (prefix match). Required for acquire/release." },
+        owner: { type: "string", description: "Lock owner name. Default: 'claude-code'" },
+        ttl_minutes: { type: "number", description: "Lock duration in minutes (acquire only). Default: 10" },
+        force: { type: "boolean", description: "Force release regardless of owner (release only). Default: false" },
       },
-      required: ["path", "cell_ids"],
-    },
-  },
-  {
-    name: "unlock_cells",
-    description:
-      "Release advisory locks on cells. Only the lock owner can release (use force=true to override).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-        cell_ids: {
-          type: "array",
-          items: { type: "string" },
-          description: "Cell IDs to unlock",
-        },
-        owner: {
-          type: "string",
-          description: "Who is releasing (must match lock owner). Default: 'claude-code'",
-        },
-        force: {
-          type: "boolean",
-          description: "Force unlock regardless of owner. Default: false",
-        },
-      },
-      required: ["path", "cell_ids"],
-    },
-  },
-  {
-    name: "list_locks",
-    description: "List all active cell locks for a notebook. Shows who holds each lock and when it expires.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
-          description: "Notebook path",
-        },
-      },
-      required: ["path"],
+      required: ["path", "action"],
     },
   },
   // ================================================================

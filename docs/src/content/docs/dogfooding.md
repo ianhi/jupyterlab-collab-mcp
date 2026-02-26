@@ -29,7 +29,7 @@ Six Claude agents worked simultaneously across four notebooks to simulate and an
 
 23 out of 23 adversary tests passed — lock enforcement held up. But the round exposed that `copy_cells` operations weren't being tracked in the change log, and that the default lock TTL (5 minutes) was too short for agents that think slowly.
 
-**Features added:** `copy_cells`/`move_cells` change tracking, 10-minute default lock TTL, `batch_insert_cells`, `client_name` attribution parameter.
+**Features added:** `copy_cells` change tracking (with `delete_source` for move), 10-minute default lock TTL, `batch_insert_cells`, `client_name` attribution parameter.
 
 ## Round 4: Concurrent writes to the same notebook
 
@@ -50,7 +50,7 @@ A recurring theme across rounds was context management. Agents that read full no
 
 - **`get_notebook_outline`** — condensed view of the notebook structure (headers + first lines) instead of reading every cell
 - **`get_notebook_changes`** — incremental polling ("what changed since version N?") so agents don't re-read the whole notebook
-- **`diff_snapshot`** — compare current state against a named checkpoint, with inline diffs showing exactly what changed
+- **`snapshot(action="diff")`** — compare current state against a named checkpoint, with inline diffs showing exactly what changed
 - **`diff_notebooks`** — cell-by-cell comparison of two notebooks
 - **`search_notebook`** — grep through source and outputs to find specific content without reading everything
 - **`get_cell_outputs`** — fetch outputs for specific cells without re-fetching source

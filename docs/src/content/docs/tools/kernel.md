@@ -5,78 +5,80 @@ description: Kernel management, diagnostics, hover info, symbol rename, diff, an
 
 Tools for kernel management, code analysis, and notebook-level operations.
 
-## get_kernel_status
+## kernel
 
-Get the status of a notebook's kernel. Requires JupyterLab connection.
+Manage the notebook's kernel. Use `action` to check status, interrupt, or restart.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `action` | `"status"` \| `"interrupt"` \| `"restart"` | Yes | Kernel operation |
 | `path` | string | Yes | Notebook path |
 
-Returns one of: `idle`, `busy`, `starting`, `dead`.
+**Examples:**
+```
+# Check kernel status (returns: idle, busy, starting, dead)
+kernel(action="status", path="nb.ipynb")
+
+# Interrupt a running execution
+kernel(action="interrupt", path="nb.ipynb")
+
+# Restart the kernel (clears all variables)
+kernel(action="restart", path="nb.ipynb")
+```
+
+**Notes:**
+- Requires JupyterLab connection
+- **interrupt** does not restart the kernel or clear state — use when code is taking too long
+- **restart** clears all variables and state
 
 ---
 
-## get_kernel_variables
+## kernel_variables
 
-List variables defined in the notebook's kernel. Requires JupyterLab connection.
+List or inspect variables defined in the notebook's kernel. When `names` is provided, returns deep inspection of those specific variables. Otherwise lists all variables.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path |
-| `detail` | string | No | `basic` | Detail level: `basic`, `schema`, or `full` |
-| `filter` | string | No | show all | Filter by name pattern (case-insensitive substring match) |
-| `include_private` | boolean | No | `false` | Include variables starting with underscore |
-| `max_variables` | number | No | `50` | Maximum number of variables to return |
+| `names` | string[] | No | — | Variable names to deep-inspect (max 20). Omit to list all |
+| `detail` | string | No | `basic` | Detail level: `basic`, `schema`, or `full` (list mode only) |
+| `filter` | string | No | show all | Filter by name pattern (case-insensitive substring match, list mode only) |
+| `include_private` | boolean | No | `false` | Include variables starting with underscore (list mode only) |
+| `max_variables` | number | No | `50` | Maximum number of variables to return (list mode only) |
 | `max_items` | number | No | `20` | Max columns/keys/elements per variable |
 
-**Detail levels:**
+**Detail levels (list mode):**
 
 - **`basic`**: Name, type, and short repr. Fast and compact.
 - **`schema`** (recommended): One-line summaries with column/dtype info for DataFrames, shape for arrays, keys for dicts. Best for agents.
 - **`full`**: Complete structured metadata. Verbose but machine-readable.
 
-**Example:**
+**Examples:**
 ```
 # Quick scan (basic)
-get_kernel_variables(path="nb.ipynb")
+kernel_variables(path="nb.ipynb")
 
 # Detailed DataFrame/array metadata (schema)
-get_kernel_variables(path="nb.ipynb", detail="schema")
+kernel_variables(path="nb.ipynb", detail="schema")
 
 # Filter for specific variables
-get_kernel_variables(path="nb.ipynb", filter="df", detail="schema")
+kernel_variables(path="nb.ipynb", filter="df", detail="schema")
+
+# Deep-inspect specific variables
+kernel_variables(path="nb.ipynb", names=["df", "results"])
+
+# Inspect with more detail
+kernel_variables(path="nb.ipynb", names=["data"], max_items=50)
 ```
 
 **Output example (schema mode):**
 ```
-df: DataFrame (100×5) [date:datetime64[ns], price:float64, volume:int64, ...]
+df: DataFrame (100x5) [date:datetime64[ns], price:float64, volume:int64, ...]
 arr: ndarray float64 (1000, 3) 23.4KB
 results: dict (15 keys) [model_a, model_b, baseline, ...]
 ```
 
----
-
-## inspect_variable
-
-Deep-inspect specific variables for full structural metadata. Returns columns, dtypes, shapes, keys, and nested structure. Use `get_kernel_variables` first to discover variable names, then `inspect_variable` for details.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `names` | array | Yes | — | Variable names to inspect (max 20) |
-| `max_items` | number | No | `20` | Max columns/keys/elements per variable |
-
-**Example:**
-```
-# Inspect DataFrames
-inspect_variable(path="nb.ipynb", names=["df", "results"])
-
-# Inspect with more detail
-inspect_variable(path="nb.ipynb", names=["data"], max_items=50)
-```
-
-**Supported types with specialized handlers:**
+**Supported types with specialized handlers (inspect mode):**
 
 - **pandas.DataFrame**: columns (name+dtype), shape, memory_bytes, MultiIndex support
 - **polars.DataFrame**: columns (name+dtype), shape, estimated_size_bytes
@@ -93,48 +95,6 @@ inspect_variable(path="nb.ipynb", names=["data"], max_items=50)
 - Never triggers lazy computation (polars `.collect()`, dask `.compute()`)
 - Never crashes on broken objects
 - All operations complete in <5ms per variable
-
-**Output example:**
-```json
-{
-  "name": "df",
-  "type": "DataFrame",
-  "shape": [1000, 5],
-  "columns": [
-    {"name": "date", "dtype": "datetime64[ns]"},
-    {"name": "price", "dtype": "float64"},
-    {"name": "volume", "dtype": "int64"}
-  ],
-  "memory_bytes": 40000,
-  "index_dtype": "RangeIndex"
-}
-```
-
----
-
-## interrupt_kernel
-
-Stop a running execution. Requires JupyterLab connection.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `path` | string | Yes | Notebook path |
-
-**Notes:**
-- Does not restart the kernel or clear state
-- Use when code is taking too long or stuck in an infinite loop
-
----
-
-## restart_kernel
-
-Restart the kernel, clearing all variables and state. Requires JupyterLab connection.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `path` | string | Yes | Notebook path |
-
-**Warning:** All variables will be lost.
 
 ---
 

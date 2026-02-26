@@ -12,83 +12,17 @@ import { readNotebook, resolveNotebookPath, writeNotebook } from "../notebook-fs
 import { connectToNotebook, isJupyterConnected, listNotebookSessions } from "../connection.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
-  "get_cell_metadata": async (args) => {
-    const { path, index, end_index, indices, cell_ids } = args as {
-      path: string;
-      index?: number;
-      end_index?: number;
-      indices?: number[];
-      cell_ids?: string[];
-    };
-
-    if (!isJupyterConnected()) {
-      const resolved = resolveNotebookPath(path);
-      const notebook = await readNotebook(resolved);
-
-      const effectiveIndices = cell_ids && cell_ids.length > 0
-        ? resolveCellIds(notebook.cells, cell_ids)
-        : indices;
-      const resolved2 = resolveCellIndices(notebook.cells.length, { index, end_index, indices: effectiveIndices });
-      const results: any[] = [];
-      for (const i of resolved2.indices) {
-        const metadataJson = notebook.cells[i].metadata || {};
-        results.push({ index: i, metadata: metadataJson, tags: metadataJson.tags || [] });
-      }
-
-      return {
-        content: [{
-          type: "text",
-          text: results.length === 1
-            ? `Cell ${resolved2.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
-            : `Metadata for ${resolved2.description}:\n${JSON.stringify(results, null, 2)}`,
-        }],
-      };
-    }
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    const { doc } = await connectToNotebook(path, session?.kernelId);
-    const cells = doc.getArray("cells");
-
-    const effectiveIndicesJup = cell_ids && cell_ids.length > 0
-      ? resolveCellIds(cells, cell_ids)
-      : indices;
-    const resolved = resolveCellIndices(cells.length, { index, end_index, indices: effectiveIndicesJup });
-
-    const results: any[] = [];
-    for (const i of resolved.indices) {
-      const cell = cells.get(i) as Y.Map<any>;
-      const metadata = cell.get("metadata");
-      const metadataJson = metadata instanceof Y.Map ? metadata.toJSON() : (metadata || {});
-      results.push({
-        index: i,
-        metadata: metadataJson,
-        tags: metadataJson.tags || [],
-      });
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: results.length === 1
-            ? `Cell ${resolved.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
-            : `Metadata for ${resolved.description}:\n${JSON.stringify(results, null, 2)}`,
-        },
-      ],
-    };
-  },
-
-  "set_cell_metadata": async (args) => {
+  "cell_metadata": async (args) => {
     const { path, index, end_index, indices, cell_ids, metadata } = args as {
       path: string;
       index?: number;
       end_index?: number;
       indices?: number[];
       cell_ids?: string[];
-      metadata: Record<string, any>;
+      metadata?: Record<string, any>;
     };
+
+    const isSet = metadata !== undefined;
 
     if (!isJupyterConnected()) {
       const resolved = resolveNotebookPath(path);
@@ -99,21 +33,163 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         : indices;
       const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices: effectiveIndices });
 
-      for (const i of resolvedIndices.indices) {
-        const cell = notebook.cells[i];
-        if (!cell.metadata) cell.metadata = {};
+      if (isSet) {
+        // SET mode
+        for (const i of resolvedIndices.indices) {
+          const cell = notebook.cells[i];
+          if (!cell.metadata) cell.metadata = {};
 
+          for (const [key, value] of Object.entries(metadata)) {
+            if (value === null) {
+              delete cell.metadata[key];
+            } else {
+              cell.metadata[key] = value;
+            }
+          }
+        }
+
+        await writeNotebook(resolved, notebook);
+        return { content: [{ type: "text", text: `Updated metadata on ${resolvedIndices.description}` }] };
+      } else {
+        // GET mode
+        const results: any[] = [];
+        for (const i of resolvedIndices.indices) {
+          const metadataJson = notebook.cells[i].metadata || {};
+          results.push({ index: i, metadata: metadataJson, tags: metadataJson.tags || [] });
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: results.length === 1
+              ? `Cell ${resolvedIndices.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
+              : `Metadata for ${resolvedIndices.description}:\n${JSON.stringify(results, null, 2)}`,
+          }],
+        };
+      }
+    }
+
+    const sessions = await listNotebookSessions();
+    const session = sessions.find((s) => s.path === path);
+
+    const { doc } = await connectToNotebook(path, session?.kernelId);
+    const cells = doc.getArray("cells");
+
+    const effectiveIndicesJup = cell_ids && cell_ids.length > 0
+      ? resolveCellIds(cells, cell_ids)
+      : indices;
+    const resolved = resolveCellIndices(cells.length, { index, end_index, indices: effectiveIndicesJup });
+
+    if (isSet) {
+      // SET mode
+      for (const i of resolved.indices) {
+        const cell = cells.get(i) as Y.Map<any>;
+        let cellMetadata = cell.get("metadata");
+
+        if (!(cellMetadata instanceof Y.Map)) {
+          cellMetadata = new Y.Map();
+          cell.set("metadata", cellMetadata);
+        }
+
+        // Merge metadata
         for (const [key, value] of Object.entries(metadata)) {
           if (value === null) {
-            delete cell.metadata[key];
+            cellMetadata.delete(key);
+          } else if (Array.isArray(value)) {
+            const arr = new Y.Array();
+            arr.push(value);
+            cellMetadata.set(key, arr);
+          } else if (typeof value === "object") {
+            const map = new Y.Map();
+            for (const [k, v] of Object.entries(value)) {
+              map.set(k, v);
+            }
+            cellMetadata.set(key, map);
           } else {
-            cell.metadata[key] = value;
+            cellMetadata.set(key, value);
           }
         }
       }
 
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Updated metadata on ${resolved.description}`,
+          },
+        ],
+      };
+    } else {
+      // GET mode
+      const results: any[] = [];
+      for (const i of resolved.indices) {
+        const cell = cells.get(i) as Y.Map<any>;
+        const cellMeta = cell.get("metadata");
+        const metadataJson = cellMeta instanceof Y.Map ? cellMeta.toJSON() : (cellMeta || {});
+        results.push({
+          index: i,
+          metadata: metadataJson,
+          tags: metadataJson.tags || [],
+        });
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: results.length === 1
+              ? `Cell ${resolved.indices[0]} metadata:\n${JSON.stringify(results[0].metadata, null, 2)}`
+              : `Metadata for ${resolved.description}:\n${JSON.stringify(results, null, 2)}`,
+          },
+        ],
+      };
+    }
+  },
+
+  "cell_tags": async (args) => {
+    const { path, action, index, end_index, indices, cell_ids, tags } = args as {
+      path: string;
+      action: "add" | "remove";
+      index?: number;
+      end_index?: number;
+      indices?: number[];
+      cell_ids?: string[];
+      tags: string[];
+    };
+
+    const actionPast = action === "add" ? "Added" : "Removed";
+    const actionPrep = action === "add" ? "to" : "from";
+
+    if (!isJupyterConnected()) {
+      const resolved = resolveNotebookPath(path);
+      const notebook = await readNotebook(resolved);
+
+      const effectiveIndices = cell_ids && cell_ids.length > 0
+        ? resolveCellIds(notebook.cells, cell_ids)
+        : indices;
+      const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices: effectiveIndices });
+
+      if (action === "add") {
+        for (const i of resolvedIndices.indices) {
+          const cell = notebook.cells[i];
+          if (!cell.metadata) cell.metadata = {};
+          if (!Array.isArray(cell.metadata.tags)) cell.metadata.tags = [];
+          for (const tag of tags) {
+            if (!cell.metadata.tags.includes(tag)) {
+              cell.metadata.tags.push(tag);
+            }
+          }
+        }
+      } else {
+        for (const i of resolvedIndices.indices) {
+          const cell = notebook.cells[i];
+          if (!cell.metadata?.tags || !Array.isArray(cell.metadata.tags)) continue;
+          cell.metadata.tags = cell.metadata.tags.filter((t: string) => !tags.includes(t));
+        }
+      }
+
       await writeNotebook(resolved, notebook);
-      return { content: [{ type: "text", text: `Updated metadata on ${resolvedIndices.description}` }] };
+      return { content: [{ type: "text", text: `${actionPast} tags [${tags.join(", ")}] ${actionPrep} ${resolvedIndices.description}` }] };
     }
 
     const sessions = await listNotebookSessions();
@@ -127,205 +203,73 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       : indices;
     const resolved = resolveCellIndices(cells.length, { index, end_index, indices: effectiveIndicesJup });
 
-    for (const i of resolved.indices) {
-      const cell = cells.get(i) as Y.Map<any>;
-      let cellMetadata = cell.get("metadata");
+    if (action === "add") {
+      for (const i of resolved.indices) {
+        const cell = cells.get(i) as Y.Map<any>;
+        let cellMetadata = cell.get("metadata");
 
-      if (!(cellMetadata instanceof Y.Map)) {
-        cellMetadata = new Y.Map();
-        cell.set("metadata", cellMetadata);
-      }
+        if (!(cellMetadata instanceof Y.Map)) {
+          cellMetadata = new Y.Map();
+          cell.set("metadata", cellMetadata);
+        }
 
-      // Merge metadata
-      for (const [key, value] of Object.entries(metadata)) {
-        if (value === null) {
-          cellMetadata.delete(key);
-        } else if (Array.isArray(value)) {
-          const arr = new Y.Array();
-          arr.push(value);
-          cellMetadata.set(key, arr);
-        } else if (typeof value === "object") {
-          const map = new Y.Map();
-          for (const [k, v] of Object.entries(value)) {
-            map.set(k, v);
-          }
-          cellMetadata.set(key, map);
+        // Get or create tags array
+        let existingTags = cellMetadata.get("tags");
+        let tagsArray: string[];
+
+        if (existingTags instanceof Y.Array) {
+          tagsArray = existingTags.toJSON() as string[];
+        } else if (Array.isArray(existingTags)) {
+          tagsArray = existingTags;
         } else {
-          cellMetadata.set(key, value);
+          tagsArray = [];
         }
-      }
-    }
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Updated metadata on ${resolved.description}`,
-        },
-      ],
-    };
-  },
-
-  "add_cell_tags": async (args) => {
-    const { path, index, end_index, indices, cell_ids, tags } = args as {
-      path: string;
-      index?: number;
-      end_index?: number;
-      indices?: number[];
-      cell_ids?: string[];
-      tags: string[];
-    };
-
-    if (!isJupyterConnected()) {
-      const resolved = resolveNotebookPath(path);
-      const notebook = await readNotebook(resolved);
-
-      const effectiveIndices = cell_ids && cell_ids.length > 0
-        ? resolveCellIds(notebook.cells, cell_ids)
-        : indices;
-      const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices: effectiveIndices });
-
-      for (const i of resolvedIndices.indices) {
-        const cell = notebook.cells[i];
-        if (!cell.metadata) cell.metadata = {};
-        if (!Array.isArray(cell.metadata.tags)) cell.metadata.tags = [];
+        // Add new tags (avoid duplicates)
         for (const tag of tags) {
-          if (!cell.metadata.tags.includes(tag)) {
-            cell.metadata.tags.push(tag);
+          if (!tagsArray.includes(tag)) {
+            tagsArray.push(tag);
           }
         }
+
+        // Set as Y.Array
+        const newTagsArray = new Y.Array();
+        newTagsArray.push(tagsArray);
+        cellMetadata.set("tags", newTagsArray);
       }
+    } else {
+      for (const i of resolved.indices) {
+        const cell = cells.get(i) as Y.Map<any>;
+        const cellMetadata = cell.get("metadata");
 
-      await writeNotebook(resolved, notebook);
-      return { content: [{ type: "text", text: `Added tags [${tags.join(", ")}] to ${resolvedIndices.description}` }] };
-    }
+        if (!(cellMetadata instanceof Y.Map)) continue;
 
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
+        let existingTags = cellMetadata.get("tags");
+        let tagsArray: string[];
 
-    const { doc } = await connectToNotebook(path, session?.kernelId);
-    const cells = doc.getArray("cells");
-
-    const effectiveIndicesJup = cell_ids && cell_ids.length > 0
-      ? resolveCellIds(cells, cell_ids)
-      : indices;
-    const resolved = resolveCellIndices(cells.length, { index, end_index, indices: effectiveIndicesJup });
-
-    for (const i of resolved.indices) {
-      const cell = cells.get(i) as Y.Map<any>;
-      let cellMetadata = cell.get("metadata");
-
-      if (!(cellMetadata instanceof Y.Map)) {
-        cellMetadata = new Y.Map();
-        cell.set("metadata", cellMetadata);
-      }
-
-      // Get or create tags array
-      let existingTags = cellMetadata.get("tags");
-      let tagsArray: string[];
-
-      if (existingTags instanceof Y.Array) {
-        tagsArray = existingTags.toJSON() as string[];
-      } else if (Array.isArray(existingTags)) {
-        tagsArray = existingTags;
-      } else {
-        tagsArray = [];
-      }
-
-      // Add new tags (avoid duplicates)
-      for (const tag of tags) {
-        if (!tagsArray.includes(tag)) {
-          tagsArray.push(tag);
+        if (existingTags instanceof Y.Array) {
+          tagsArray = existingTags.toJSON() as string[];
+        } else if (Array.isArray(existingTags)) {
+          tagsArray = existingTags;
+        } else {
+          continue; // No tags to remove
         }
-      }
 
-      // Set as Y.Array
-      const newTagsArray = new Y.Array();
-      newTagsArray.push(tagsArray);
-      cellMetadata.set("tags", newTagsArray);
+        // Remove specified tags
+        tagsArray = tagsArray.filter((t) => !tags.includes(t));
+
+        // Set as Y.Array
+        const newTagsArray = new Y.Array();
+        newTagsArray.push(tagsArray);
+        cellMetadata.set("tags", newTagsArray);
+      }
     }
 
     return {
       content: [
         {
           type: "text",
-          text: `Added tags [${tags.join(", ")}] to ${resolved.description}`,
-        },
-      ],
-    };
-  },
-
-  "remove_cell_tags": async (args) => {
-    const { path, index, end_index, indices, cell_ids, tags } = args as {
-      path: string;
-      index?: number;
-      end_index?: number;
-      indices?: number[];
-      cell_ids?: string[];
-      tags: string[];
-    };
-
-    if (!isJupyterConnected()) {
-      const resolved = resolveNotebookPath(path);
-      const notebook = await readNotebook(resolved);
-
-      const effectiveIndices = cell_ids && cell_ids.length > 0
-        ? resolveCellIds(notebook.cells, cell_ids)
-        : indices;
-      const resolvedIndices = resolveCellIndices(notebook.cells.length, { index, end_index, indices: effectiveIndices });
-
-      for (const i of resolvedIndices.indices) {
-        const cell = notebook.cells[i];
-        if (!cell.metadata?.tags || !Array.isArray(cell.metadata.tags)) continue;
-        cell.metadata.tags = cell.metadata.tags.filter((t: string) => !tags.includes(t));
-      }
-
-      await writeNotebook(resolved, notebook);
-      return { content: [{ type: "text", text: `Removed tags [${tags.join(", ")}] from ${resolvedIndices.description}` }] };
-    }
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    const { doc } = await connectToNotebook(path, session?.kernelId);
-    const cells = doc.getArray("cells");
-
-    const effectiveIndicesJup = cell_ids && cell_ids.length > 0
-      ? resolveCellIds(cells, cell_ids)
-      : indices;
-    const resolved = resolveCellIndices(cells.length, { index, end_index, indices: effectiveIndicesJup });
-
-    for (const i of resolved.indices) {
-      const cell = cells.get(i) as Y.Map<any>;
-      const cellMetadata = cell.get("metadata");
-
-      if (!(cellMetadata instanceof Y.Map)) continue;
-
-      let existingTags = cellMetadata.get("tags");
-      let tagsArray: string[];
-
-      if (existingTags instanceof Y.Array) {
-        tagsArray = existingTags.toJSON() as string[];
-      } else if (Array.isArray(existingTags)) {
-        tagsArray = existingTags;
-      } else {
-        continue; // No tags to remove
-      }
-
-      // Remove specified tags
-      tagsArray = tagsArray.filter((t) => !tags.includes(t));
-
-      // Set as Y.Array
-      const newTagsArray = new Y.Array();
-      newTagsArray.push(tagsArray);
-      cellMetadata.set("tags", newTagsArray);
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Removed tags [${tags.join(", ")}] from ${resolved.description}`,
+          text: `${actionPast} tags [${tags.join(", ")}] ${actionPrep} ${resolved.description}`,
         },
       ],
     };
@@ -420,56 +364,34 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
   },
 
-  "get_notebook_metadata": async (args) => {
-    const { path } = args as { path: string };
-
-    if (!isJupyterConnected()) {
-      const resolved = resolveNotebookPath(path);
-      const notebook = await readNotebook(resolved);
-      return {
-        content: [{ type: "text", text: `Notebook metadata for ${path}:\n${JSON.stringify(notebook.metadata, null, 2)}` }],
-      };
-    }
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    const { doc } = await connectToNotebook(path, session?.kernelId);
-    const meta = doc.getMap("meta");
-    const metadata = meta.get("metadata");
-
-    const metadataJson = metadata instanceof Y.Map ? metadata.toJSON() : (metadata || {});
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Notebook metadata for ${path}:\n${JSON.stringify(metadataJson, null, 2)}`,
-        },
-      ],
-    };
-  },
-
-  "set_notebook_metadata": async (args) => {
+  "notebook_metadata": async (args) => {
     const { path, metadata } = args as {
       path: string;
-      metadata: Record<string, any>;
+      metadata?: Record<string, any>;
     };
+
+    const isSet = metadata !== undefined;
 
     if (!isJupyterConnected()) {
       const resolved = resolveNotebookPath(path);
       const notebook = await readNotebook(resolved);
 
-      for (const [key, value] of Object.entries(metadata)) {
-        if (value === null) {
-          delete notebook.metadata[key];
-        } else {
-          notebook.metadata[key] = value;
+      if (isSet) {
+        for (const [key, value] of Object.entries(metadata)) {
+          if (value === null) {
+            delete notebook.metadata[key];
+          } else {
+            notebook.metadata[key] = value;
+          }
         }
-      }
 
-      await writeNotebook(resolved, notebook);
-      return { content: [{ type: "text", text: `Updated notebook metadata for ${path}` }] };
+        await writeNotebook(resolved, notebook);
+        return { content: [{ type: "text", text: `Updated notebook metadata for ${path}` }] };
+      } else {
+        return {
+          content: [{ type: "text", text: `Notebook metadata for ${path}:\n${JSON.stringify(notebook.metadata, null, 2)}` }],
+        };
+      }
     }
 
     const sessions = await listNotebookSessions();
@@ -477,39 +399,54 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const { doc } = await connectToNotebook(path, session?.kernelId);
     const meta = doc.getMap("meta");
-    const existingMetadata = meta.get("metadata");
 
-    let notebookMetadata: Y.Map<any>;
-    if (existingMetadata instanceof Y.Map) {
-      notebookMetadata = existingMetadata;
-    } else {
-      notebookMetadata = new Y.Map();
-      meta.set("metadata", notebookMetadata);
-    }
+    if (isSet) {
+      const existingMetadata = meta.get("metadata");
 
-    // Merge metadata
-    for (const [key, value] of Object.entries(metadata)) {
-      if (value === null) {
-        notebookMetadata.delete(key);
-      } else if (typeof value === "object" && !Array.isArray(value)) {
-        // For nested objects like kernelspec, create Y.Map
-        const map = new Y.Map();
-        for (const [k, v] of Object.entries(value)) {
-          map.set(k, v);
-        }
-        notebookMetadata.set(key, map);
+      let notebookMetadata: Y.Map<any>;
+      if (existingMetadata instanceof Y.Map) {
+        notebookMetadata = existingMetadata;
       } else {
-        notebookMetadata.set(key, value);
+        notebookMetadata = new Y.Map();
+        meta.set("metadata", notebookMetadata);
       }
-    }
 
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Updated notebook metadata for ${path}`,
-        },
-      ],
-    };
+      // Merge metadata
+      for (const [key, value] of Object.entries(metadata)) {
+        if (value === null) {
+          notebookMetadata.delete(key);
+        } else if (typeof value === "object" && !Array.isArray(value)) {
+          // For nested objects like kernelspec, create Y.Map
+          const map = new Y.Map();
+          for (const [k, v] of Object.entries(value)) {
+            map.set(k, v);
+          }
+          notebookMetadata.set(key, map);
+        } else {
+          notebookMetadata.set(key, value);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Updated notebook metadata for ${path}`,
+          },
+        ],
+      };
+    } else {
+      const metadataValue = meta.get("metadata");
+      const metadataJson = metadataValue instanceof Y.Map ? metadataValue.toJSON() : (metadataValue || {});
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Notebook metadata for ${path}:\n${JSON.stringify(metadataJson, null, 2)}`,
+          },
+        ],
+      };
+    }
   },
 };

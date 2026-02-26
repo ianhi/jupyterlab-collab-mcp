@@ -17,10 +17,6 @@ Execute a cell in the notebook's kernel. Outputs appear in JupyterLab and are re
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return (shows last N) |
 | `include_images` | boolean | No | `true` | Include images in response |
-| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
-
 **Examples:**
 ```
 # Run cell 3
@@ -47,21 +43,17 @@ Execute code in the notebook's kernel without modifying the notebook. Works with
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path (identifies which kernel) |
 | `code` | string | Yes | — | Code to execute |
-| `insertCell` | boolean | No | `false` | Also insert as a new cell with visible outputs |
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return |
 | `include_images` | boolean | No | `true` | Include images in response |
-| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Examples:**
 ```
 # Quick check without adding a cell
 execute_code(path="nb.ipynb", code="df.shape")
 
-# Execute and add to notebook
-execute_code(path="nb.ipynb", code="df.describe()", insertCell=true)
+# Execute and insert as a cell — use insert_cell instead:
+insert_cell(path="nb.ipynb", source="df.describe()", execute=true)
 ```
 
 ---
@@ -77,9 +69,6 @@ Execute multiple cells in sequence. Continues on error (doesn't stop). Automatic
 | `end_index` | number | No | last cell | Last cell index (inclusive) |
 | `cell_ids` | string[] | No | — | Cell IDs to execute in order |
 | `timeout` | number | No | `30000` | Timeout per cell in milliseconds |
-| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
 
 **Examples:**
 ```
@@ -95,50 +84,35 @@ execute_range(path="nb.ipynb", cell_ids=["a3f8c2d1", "b7e4f9a2", "c1d2e3f4"])
 
 ---
 
-## insert_and_execute
+## filter_output
 
-Insert a new code cell and immediately execute it. Combines `insert_cell` + `execute_cell` in one operation.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `path` | string | Yes | — | Notebook path |
-| `source` | string | Yes | — | Code to insert and execute |
-| `index` | number | No | end | Position to insert |
-| `cell_id` | string | No | — | Insert after this cell ID |
-| `timeout` | number | No | `30000` | Execution timeout |
-| `max_images` | number | No | all | Maximum images to return |
-| `include_images` | boolean | No | `true` | Include images |
-| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
-| `client_name` | string | No | `"claude-code"` | Agent name for attribution |
-
-**Example:**
-```
-insert_and_execute(path="nb.ipynb", source="print('hello')", index=0)
-```
-
----
-
-## update_and_execute
-
-Update a cell's source code and immediately execute it. Combines `update_cell` + `execute_cell`.
+Post-process cached execution output. Use after `execute_cell`, `execute_code`, or `execute_range` to filter or paginate large outputs without re-executing.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `path` | string | Yes | — | Notebook path |
-| `source` | string | Yes | — | New source code |
-| `index` | number | No | — | Cell index |
+| `index` | number | No | — | Cell index whose output to filter |
 | `cell_id` | string | No | — | Cell ID (alternative to index) |
-| `force` | boolean | No | `false` | Force update even if human is editing |
-| `timeout` | number | No | `30000` | Execution timeout |
-| `max_images` | number | No | all | Maximum images to return |
-| `include_images` | boolean | No | `true` | Include images |
-| `show_diff` | boolean | No | `false` | Include a diff of the source change |
-| `max_output_lines` | number | No | `50` | Max output lines. Head/tail split. Set 0 for unlimited |
-| `output_tail` | number | No | — | Show only last N lines. Overrides max_output_lines |
-| `output_grep` | string | No | — | Regex filter — only include matching output lines |
-| `client_name` | string | No | `"claude-code"` | Agent name for attribution |
+| `grep` | string | No | — | Regex filter — only include matching output lines |
+| `head` | number | No | — | Show only first N lines |
+| `tail` | number | No | — | Show only last N lines |
+| `max_lines` | number | No | — | Max output lines (head/tail split) |
+
+**Examples:**
+```
+# Filter to error lines only
+filter_output(path="nb.ipynb", index=5, grep="Error|Traceback")
+
+# Show last 20 lines of output
+filter_output(path="nb.ipynb", index=5, tail=20)
+
+# Limit to 100 lines with head/tail split
+filter_output(path="nb.ipynb", cell_id="a3f8c2d1", max_lines=100)
+```
+
+**Notes:**
+- Works on the cached output from the most recent execution — does not re-execute
+- Filters can be combined: `grep` filters first, then `head`/`tail`/`max_lines` applies
 
 ---
 

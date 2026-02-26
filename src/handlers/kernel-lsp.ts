@@ -31,54 +31,105 @@ import {
 } from "../variable-inspector.js";
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
-  "get_kernel_status": async (args) => {
-    const { path } = args as { path: string };
+  "kernel": async (args) => {
+    const { path, action } = args as { path: string; action: string };
 
     const sessions = await listNotebookSessions();
     const session = sessions.find((s) => s.path === path);
 
-    if (!session?.kernelId) {
+    if (action === "status") {
+      if (!session?.kernelId) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
+            },
+          ],
+        };
+      }
+
+      const response = await apiFetch(`/api/kernels/${session.kernelId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to get kernel status: ${response.statusText}`);
+      }
+
+      const kernel = await response.json();
+      const lines = [
+        `Kernel status for ${path}:`,
+        `  Status: ${kernel.execution_state || "unknown"}`,
+        `  Name: ${kernel.name}`,
+        `  ID: ${kernel.id}`,
+      ];
+      if (kernel.connections !== undefined) {
+        lines.push(`  Connections: ${kernel.connections}`);
+      }
+      if (kernel.last_activity) {
+        lines.push(`  Last activity: ${kernel.last_activity}`);
+      }
       return {
         content: [
           {
             type: "text",
-            text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
+            text: lines.join("\n"),
           },
         ],
       };
     }
 
-    const response = await apiFetch(`/api/kernels/${session.kernelId}`);
-    if (!response.ok) {
-      throw new Error(`Failed to get kernel status: ${response.statusText}`);
+    if (action === "interrupt") {
+      if (!session?.kernelId) {
+        throw new Error(`No active kernel for ${path}. Nothing to interrupt.`);
+      }
+
+      const response = await apiFetch(`/api/kernels/${session.kernelId}/interrupt`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to interrupt kernel: ${response.statusText}`);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Interrupted kernel for ${path}. Execution stopped but variables preserved.`,
+          },
+        ],
+      };
     }
 
-    const kernel = await response.json();
-    const lines = [
-      `Kernel status for ${path}:`,
-      `  Status: ${kernel.execution_state || "unknown"}`,
-      `  Name: ${kernel.name}`,
-      `  ID: ${kernel.id}`,
-    ];
-    if (kernel.connections !== undefined) {
-      lines.push(`  Connections: ${kernel.connections}`);
+    if (action === "restart") {
+      if (!session?.kernelId) {
+        throw new Error(`No active kernel for ${path}. Use open_notebook to start a kernel.`);
+      }
+
+      const response = await apiFetch(`/api/kernels/${session.kernelId}/restart`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to restart kernel: ${response.statusText}`);
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Restarted kernel for ${path}. All variables cleared. Kernel is ready for new execution.`,
+          },
+        ],
+      };
     }
-    if (kernel.last_activity) {
-      lines.push(`  Last activity: ${kernel.last_activity}`);
-    }
-    return {
-      content: [
-        {
-          type: "text",
-          text: lines.join("\n"),
-        },
-      ],
-    };
+
+    throw new Error(`Unknown kernel action '${action}'. Must be one of: status, interrupt, restart.`);
   },
 
-  "get_kernel_variables": async (args) => {
+  "kernel_variables": async (args) => {
     const {
       path,
+      names,
       detail = "basic",
       filter: filterName,
       include_private: includePrivate = false,
@@ -87,6 +138,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       max_name_length: maxNameLength = 60,
     } = args as {
       path: string;
+      names?: string[];
       detail?: string;
       filter?: string;
       include_private?: boolean;
@@ -109,6 +161,43 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       };
     }
 
+    // If names provided, do deep inspection instead of listing
+    if (names && names.length > 0) {
+      if (names.length > 20) {
+        throw new Error("Maximum 20 variable names per call.");
+      }
+
+      const code = generateInspectVariablesCode({ names, maxItems, maxNameLength });
+      const result = await executeCode(session.kernelId, code);
+
+      if (result.status === "error") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to inspect variables: ${result.text}`,
+            },
+          ],
+        };
+      }
+
+      try {
+        const inspections = JSON.parse(result.text.trim()) as Record<string, unknown>[];
+        const parts = inspections.map((info) => formatOneInspection(info));
+        return { content: [{ type: "text", text: parts.join("\n\n") }] };
+      } catch {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Could not parse inspection results. Raw output: ${result.text}`,
+            },
+          ],
+        };
+      }
+    }
+
+    // List all variables
     const code = generateListVariablesCode({
       detail,
       maxVariables,
@@ -154,126 +243,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         ],
       };
     }
-  },
-
-  "inspect_variable": async (args) => {
-    const {
-      path,
-      names,
-      max_items: maxItems = 20,
-      max_name_length: maxNameLength = 60,
-    } = args as {
-      path: string;
-      names: string[];
-      max_items?: number;
-      max_name_length?: number | null;
-    };
-
-    if (!names || names.length === 0) {
-      throw new Error("'names' must be a non-empty array of variable names.");
-    }
-    if (names.length > 20) {
-      throw new Error("Maximum 20 variable names per call.");
-    }
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `No active kernel for ${path}. Use open_notebook to start a kernel.`,
-          },
-        ],
-      };
-    }
-
-    const code = generateInspectVariablesCode({ names, maxItems, maxNameLength });
-    const result = await executeCode(session.kernelId, code);
-
-    if (result.status === "error") {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Failed to inspect variables: ${result.text}`,
-          },
-        ],
-      };
-    }
-
-    try {
-      const inspections = JSON.parse(result.text.trim()) as Record<string, unknown>[];
-      const parts = inspections.map((info) => formatOneInspection(info));
-      return { content: [{ type: "text", text: parts.join("\n\n") }] };
-    } catch {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Could not parse inspection results. Raw output: ${result.text}`,
-          },
-        ],
-      };
-    }
-  },
-
-  "interrupt_kernel": async (args) => {
-    const { path } = args as { path: string };
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      throw new Error(`No active kernel for ${path}. Nothing to interrupt.`);
-    }
-
-    const response = await apiFetch(`/api/kernels/${session.kernelId}/interrupt`, {
-      method: "POST",
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to interrupt kernel: ${response.statusText}`);
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Interrupted kernel for ${path}. Execution stopped but variables preserved.`,
-        },
-      ],
-    };
-  },
-
-  "restart_kernel": async (args) => {
-    const { path } = args as { path: string };
-
-    const sessions = await listNotebookSessions();
-    const session = sessions.find((s) => s.path === path);
-
-    if (!session?.kernelId) {
-      throw new Error(`No active kernel for ${path}. Use open_notebook to start a kernel.`);
-    }
-
-    const response = await apiFetch(`/api/kernels/${session.kernelId}/restart`, {
-      method: "POST",
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to restart kernel: ${response.statusText}`);
-    }
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Restarted kernel for ${path}. All variables cleared. Kernel is ready for new execution.`,
-        },
-      ],
-    };
   },
 
   "get_diagnostics": async (args) => {

@@ -474,3 +474,52 @@ export async function executeCode(
     });
   });
 }
+
+// ============================================================================
+// Execution output cache (for filter_output tool)
+// ============================================================================
+
+export interface CachedExecution {
+  text: string;           // full unfiltered output text
+  images: { data: string; mimeType: string }[];
+  executionId: string;    // short ID for multi-agent safety
+  cellIndex?: number;
+  cellId?: string;
+  timestamp: number;
+}
+
+// Keyed by notebook path (stores most recent execution per path)
+const executionCache = new Map<string, CachedExecution>();
+// Also keyed by executionId for direct lookup
+const executionCacheById = new Map<string, CachedExecution>();
+
+export function cacheExecution(path: string, result: { text: string; images: { data: string; mimeType: string }[]; cellIndex?: number; cellId?: string }): string {
+  const executionId = crypto.randomUUID().slice(0, 8);
+  const cached: CachedExecution = {
+    text: result.text,
+    images: result.images,
+    executionId,
+    cellIndex: result.cellIndex,
+    cellId: result.cellId,
+    timestamp: Date.now(),
+  };
+  executionCache.set(path, cached);
+  executionCacheById.set(executionId, cached);
+
+  // Evict old entries (keep last 50)
+  if (executionCacheById.size > 50) {
+    const oldest = [...executionCacheById.entries()]
+      .sort((a, b) => a[1].timestamp - b[1].timestamp)
+      .slice(0, executionCacheById.size - 50);
+    for (const [id] of oldest) executionCacheById.delete(id);
+  }
+
+  return executionId;
+}
+
+export function getCachedExecution(path: string, executionId?: string): CachedExecution | undefined {
+  if (executionId) {
+    return executionCacheById.get(executionId);
+  }
+  return executionCache.get(path);
+}

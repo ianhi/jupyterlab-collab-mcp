@@ -243,263 +243,264 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
   },
 
-  "snapshot_notebook": async (args) => {
-    const { path, name: snapName, description: snapDesc } = args as {
+  "snapshot": async (args) => {
+    const { path, action, name: snapName, description: snapDesc } = args as {
       path: string;
-      name: string;
+      action: string;
+      name?: string;
       description?: string;
     };
 
-    const { cells, doc } = await getNotebookCells(path);
-    const snapshot = createSnapshot(path, snapName, cells, snapDesc, doc);
-
-    return {
-      content: [{
-        type: "text",
-        text: `Snapshot '${snapName}' saved for ${path} (${snapshot.cells.length} cells captured at ${snapshot.createdAt})${snapDesc ? `\nDescription: ${snapDesc}` : ""}`,
-      }],
-    };
-  },
-
-  "restore_snapshot": async (args) => {
-    const { path, name: snapName } = args as {
-      path: string;
-      name: string;
-    };
-
-    const { cells, mode, notebook, doc } = await getNotebookCells(path);
-
-    const snapshot = getSnapshot(path, snapName, doc);
-    if (!snapshot) {
-      throw new Error(`No snapshot named '${snapName}' found for ${path}. Use list_snapshots to see available snapshots.`);
-    }
-
-    // Auto-save a pre-restore snapshot for safety
-    createSnapshot(path, `pre-restore-${Date.now()}`, cells, `Auto-saved before restoring '${snapName}'`, doc);
-
-    if (mode === "jupyter" && doc) {
-      const yCells = doc.getArray("cells");
-      const restored = restoreSnapshotToYjs(snapshot, yCells, doc);
-
-      recordChange(path, {
-        operation: "restore",
-        cellId: "",
-        cellIdShort: "",
-        cellIndex: -1,
-        detail: `restored snapshot '${snapName}' (${restored} cells)`,
-        client: "claude-code",
-      }, doc);
+    if (action === "save") {
+      if (!snapName) throw new Error("'name' is required for save action.");
+      const { cells, doc } = await getNotebookCells(path);
+      const snapshot = createSnapshot(path, snapName, cells, snapDesc, doc);
 
       return {
         content: [{
           type: "text",
-          text: `Restored snapshot '${snapName}' to ${path} (${restored} cells). A pre-restore snapshot was auto-saved.`,
-        }],
-      };
-    } else if (notebook) {
-      const newCells = restoreSnapshotToFs(snapshot);
-      notebook.cells = newCells;
-      const resolved = resolveNotebookPath(path);
-      await writeNotebook(resolved, notebook);
-
-      return {
-        content: [{
-          type: "text",
-          text: `Restored snapshot '${snapName}' to ${path} (${newCells.length} cells). A pre-restore snapshot was auto-saved.`,
+          text: `Snapshot '${snapName}' saved for ${path} (${snapshot.cells.length} cells captured at ${snapshot.createdAt})${snapDesc ? `\nDescription: ${snapDesc}` : ""}`,
         }],
       };
     }
 
-    throw new Error("Could not restore snapshot — notebook access failed.");
-  },
+    if (action === "restore") {
+      if (!snapName) throw new Error("'name' is required for restore action.");
+      const { cells, mode, notebook, doc } = await getNotebookCells(path);
 
-  "list_snapshots": async (args) => {
-    const { path } = args as { path: string };
-
-    const { doc } = await getNotebookCells(path);
-    const snaps = listSnapshotsForPath(path, doc);
-    if (snaps.length === 0) {
-      return {
-        content: [{
-          type: "text",
-          text: `No snapshots saved for ${path}. Use snapshot_notebook to create one.`,
-        }],
-      };
-    }
-
-    const lines = snaps.map((s) => {
-      const time = new Date(s.createdAt).toLocaleTimeString();
-      let line = `- **${s.name}** (${s.cells.length} cells, ${time})`;
-      if (s.description) line += ` — ${s.description}`;
-      return line;
-    });
-
-    return {
-      content: [{
-        type: "text",
-        text: `Snapshots for ${path} (${snaps.length}):\n\n${lines.join("\n")}`,
-      }],
-    };
-  },
-
-  "diff_snapshot": async (args) => {
-    const { path, name: snapName } = args as {
-      path: string;
-      name: string;
-    };
-
-    const { cells, doc } = await getNotebookCells(path);
-
-    const snapshot = getSnapshot(path, snapName, doc);
-    if (!snapshot) {
-      throw new Error(`No snapshot named '${snapName}' found for ${path}.`);
-    }
-
-    const result = diffSnapshot(snapshot, cells);
-
-    const summary = `Diff: snapshot '${snapName}' vs current ${path}:\n` +
-      `  Added: ${result.added}, Deleted: ${result.deleted}, Modified: ${result.modified}, Unchanged: ${result.unchanged}`;
-
-    const detailLines: string[] = [];
-    for (const d of result.details) {
-      if (d.status === "unchanged") continue;
-      const prefix = d.status === "added" ? "+" : d.status === "deleted" ? "-" : "~";
-      let line = `  ${prefix} ${d.cellId} (${d.status})`;
-
-      if (d.status === "modified" && d.oldSource !== undefined && d.newSource !== undefined) {
-        const oldLines = d.oldSource.split("\n").length;
-        const newLines = d.newSource.split("\n").length;
-        line += ` [${oldLines} → ${newLines} lines]`;
-        // Show compact diff preview (first change)
-        const diff = generateUnifiedDiff(d.oldSource, d.newSource, d.cellId);
-        const diffLines = diff.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).slice(0, 6);
-        if (diffLines.length > 0) {
-          line += "\n" + diffLines.map(l => `      ${l}`).join("\n");
-        }
-      } else if (d.status === "deleted" && d.oldSource) {
-        line += ` [${d.oldSource.split("\n").length} lines removed]`;
-      } else if (d.status === "added" && d.newSource) {
-        line += ` [${d.newSource.split("\n").length} lines added]`;
+      const snapshot = getSnapshot(path, snapName, doc);
+      if (!snapshot) {
+        throw new Error(`No snapshot named '${snapName}' found for ${path}. Use snapshot with action='list' to see available snapshots.`);
       }
 
-      detailLines.push(line);
+      // Auto-save a pre-restore snapshot for safety
+      createSnapshot(path, `pre-restore-${Date.now()}`, cells, `Auto-saved before restoring '${snapName}'`, doc);
+
+      if (mode === "jupyter" && doc) {
+        const yCells = doc.getArray("cells");
+        const restored = restoreSnapshotToYjs(snapshot, yCells, doc);
+
+        recordChange(path, {
+          operation: "restore",
+          cellId: "",
+          cellIdShort: "",
+          cellIndex: -1,
+          detail: `restored snapshot '${snapName}' (${restored} cells)`,
+          client: "claude-code",
+        }, doc);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Restored snapshot '${snapName}' to ${path} (${restored} cells). A pre-restore snapshot was auto-saved.`,
+          }],
+        };
+      } else if (notebook) {
+        const newCells = restoreSnapshotToFs(snapshot);
+        notebook.cells = newCells;
+        const resolved = resolveNotebookPath(path);
+        await writeNotebook(resolved, notebook);
+
+        return {
+          content: [{
+            type: "text",
+            text: `Restored snapshot '${snapName}' to ${path} (${newCells.length} cells). A pre-restore snapshot was auto-saved.`,
+          }],
+        };
+      }
+
+      throw new Error("Could not restore snapshot — notebook access failed.");
     }
 
-    const details = detailLines.join("\n");
-    return {
-      content: [{
-        type: "text",
-        text: summary + (details ? `\n\n${details}` : "\n\n(no differences)"),
-      }],
-    };
+    if (action === "list") {
+      const { doc } = await getNotebookCells(path);
+      const snaps = listSnapshotsForPath(path, doc);
+      if (snaps.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: `No snapshots saved for ${path}. Use snapshot with action='save' to create one.`,
+          }],
+        };
+      }
+
+      const lines = snaps.map((s) => {
+        const time = new Date(s.createdAt).toLocaleTimeString();
+        let line = `- **${s.name}** (${s.cells.length} cells, ${time})`;
+        if (s.description) line += ` — ${s.description}`;
+        return line;
+      });
+
+      return {
+        content: [{
+          type: "text",
+          text: `Snapshots for ${path} (${snaps.length}):\n\n${lines.join("\n")}`,
+        }],
+      };
+    }
+
+    if (action === "diff") {
+      if (!snapName) throw new Error("'name' is required for diff action.");
+      const { cells, doc } = await getNotebookCells(path);
+
+      const snapshot = getSnapshot(path, snapName, doc);
+      if (!snapshot) {
+        throw new Error(`No snapshot named '${snapName}' found for ${path}.`);
+      }
+
+      const result = diffSnapshot(snapshot, cells);
+
+      const summary = `Diff: snapshot '${snapName}' vs current ${path}:\n` +
+        `  Added: ${result.added}, Deleted: ${result.deleted}, Modified: ${result.modified}, Unchanged: ${result.unchanged}`;
+
+      const detailLines: string[] = [];
+      for (const d of result.details) {
+        if (d.status === "unchanged") continue;
+        const prefix = d.status === "added" ? "+" : d.status === "deleted" ? "-" : "~";
+        let line = `  ${prefix} ${d.cellId} (${d.status})`;
+
+        if (d.status === "modified" && d.oldSource !== undefined && d.newSource !== undefined) {
+          const oldLines = d.oldSource.split("\n").length;
+          const newLines = d.newSource.split("\n").length;
+          line += ` [${oldLines} → ${newLines} lines]`;
+          // Show compact diff preview (first change)
+          const diff = generateUnifiedDiff(d.oldSource, d.newSource, d.cellId);
+          const diffLines = diff.split("\n").filter(l => l.startsWith("+") || l.startsWith("-")).slice(0, 6);
+          if (diffLines.length > 0) {
+            line += "\n" + diffLines.map(l => `      ${l}`).join("\n");
+          }
+        } else if (d.status === "deleted" && d.oldSource) {
+          line += ` [${d.oldSource.split("\n").length} lines removed]`;
+        } else if (d.status === "added" && d.newSource) {
+          line += ` [${d.newSource.split("\n").length} lines added]`;
+        }
+
+        detailLines.push(line);
+      }
+
+      const details = detailLines.join("\n");
+      return {
+        content: [{
+          type: "text",
+          text: summary + (details ? `\n\n${details}` : "\n\n(no differences)"),
+        }],
+      };
+    }
+
+    throw new Error(`Unknown snapshot action '${action}'. Must be one of: save, restore, list, diff.`);
   },
 
-  "lock_cells": async (args) => {
-    const { path, cell_ids: lockCellIds, owner = "claude-code", ttl_minutes = 10 } = args as {
+  "cell_locks": async (args) => {
+    const { path, action, cell_ids: lockCellIds, owner = "claude-code", ttl_minutes = 10, force = false } = args as {
       path: string;
-      cell_ids: string[];
+      action: string;
+      cell_ids?: string[];
       owner?: string;
       ttl_minutes?: number;
-    };
-
-    // Resolve cell_id prefixes to full IDs
-    const { cells, doc } = await getNotebookCells(path);
-    const fullIds: string[] = [];
-    for (const prefix of lockCellIds) {
-      const idx = resolveCellId(cells, prefix);
-      const cell = cells instanceof Array ? cells[idx] : (cells as any).get(idx);
-      const fullId = getCellId(cell);
-      if (fullId) fullIds.push(fullId);
-    }
-
-    const ttlMs = ttl_minutes * 60 * 1000;
-    const result = acquireLocks(path, fullIds, owner, ttlMs, doc);
-
-    const lines: string[] = [];
-    if (result.acquired.length > 0) {
-      lines.push(`Locked ${result.acquired.length} cell(s) for "${owner}" (expires in ${ttl_minutes} min):`);
-      for (const lock of result.acquired) {
-        const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
-        lines.push(`  ${lock.cellId.slice(0, 8)} — expires in ${formatTimeRemaining(remaining)}`);
-      }
-    }
-    if (result.blocked.length > 0) {
-      lines.push(`\nBlocked ${result.blocked.length} cell(s) — already locked:`);
-      for (const b of result.blocked) {
-        lines.push(`  ${b.cellId.slice(0, 8)} — held by "${b.owner}"`);
-      }
-    }
-
-    return {
-      content: [{ type: "text", text: lines.join("\n") || "No cells to lock." }],
-    };
-  },
-
-  "unlock_cells": async (args) => {
-    const { path, cell_ids: unlockCellIds, owner = "claude-code", force = false } = args as {
-      path: string;
-      cell_ids: string[];
-      owner?: string;
       force?: boolean;
     };
 
-    // Resolve cell_id prefixes to full IDs
-    const { cells, doc } = await getNotebookCells(path);
-    const fullIds: string[] = [];
-    for (const prefix of unlockCellIds) {
-      try {
+    if (action === "acquire") {
+      if (!lockCellIds || lockCellIds.length === 0) {
+        throw new Error("'cell_ids' is required for acquire action.");
+      }
+
+      // Resolve cell_id prefixes to full IDs
+      const { cells, doc } = await getNotebookCells(path);
+      const fullIds: string[] = [];
+      for (const prefix of lockCellIds) {
         const idx = resolveCellId(cells, prefix);
         const cell = cells instanceof Array ? cells[idx] : (cells as any).get(idx);
         const fullId = getCellId(cell);
         if (fullId) fullIds.push(fullId);
-      } catch {
-        // Cell may have been deleted — try the prefix as-is
-        fullIds.push(prefix);
       }
-    }
 
-    const result = releaseLocks(path, fullIds, owner, force, doc);
+      const ttlMs = ttl_minutes * 60 * 1000;
+      const result = acquireLocks(path, fullIds, owner, ttlMs, doc);
 
-    const lines: string[] = [];
-    if (result.released.length > 0) {
-      lines.push(`Unlocked ${result.released.length} cell(s):`);
-      for (const id of result.released) lines.push(`  ${id.slice(0, 8)}`);
-    }
-    if (result.notOwned.length > 0) {
-      lines.push(`\n${result.notOwned.length} cell(s) owned by someone else (use force=true):`);
-      for (const id of result.notOwned) lines.push(`  ${id.slice(0, 8)}`);
-    }
-    if (result.notFound.length > 0) {
-      lines.push(`\n${result.notFound.length} cell(s) had no lock:`);
-      for (const id of result.notFound) lines.push(`  ${id.slice(0, 8)}`);
-    }
+      const lines: string[] = [];
+      if (result.acquired.length > 0) {
+        lines.push(`Locked ${result.acquired.length} cell(s) for "${owner}" (expires in ${ttl_minutes} min):`);
+        for (const lock of result.acquired) {
+          const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
+          lines.push(`  ${lock.cellId.slice(0, 8)} — expires in ${formatTimeRemaining(remaining)}`);
+        }
+      }
+      if (result.blocked.length > 0) {
+        lines.push(`\nBlocked ${result.blocked.length} cell(s) — already locked:`);
+        for (const b of result.blocked) {
+          lines.push(`  ${b.cellId.slice(0, 8)} — held by "${b.owner}"`);
+        }
+      }
 
-    return {
-      content: [{ type: "text", text: lines.join("\n") || "No cells to unlock." }],
-    };
-  },
-
-  "list_locks": async (args) => {
-    const { path } = args as { path: string };
-
-    const { doc } = await getNotebookCells(path);
-    const activeLocks = listLocksForPath(path, doc);
-
-    if (activeLocks.length === 0) {
       return {
-        content: [{ type: "text", text: `No active locks on ${path}.` }],
+        content: [{ type: "text", text: lines.join("\n") || "No cells to lock." }],
       };
     }
 
-    const lines = [`${activeLocks.length} active lock(s) on ${path}:\n`];
-    for (const lock of activeLocks) {
-      const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
-      lines.push(`  ${lock.cellId.slice(0, 8)} — owner: "${lock.owner}", expires in ${remaining}s`);
+    if (action === "release") {
+      if (!lockCellIds || lockCellIds.length === 0) {
+        throw new Error("'cell_ids' is required for release action.");
+      }
+
+      // Resolve cell_id prefixes to full IDs
+      const { cells, doc } = await getNotebookCells(path);
+      const fullIds: string[] = [];
+      for (const prefix of lockCellIds) {
+        try {
+          const idx = resolveCellId(cells, prefix);
+          const cell = cells instanceof Array ? cells[idx] : (cells as any).get(idx);
+          const fullId = getCellId(cell);
+          if (fullId) fullIds.push(fullId);
+        } catch {
+          // Cell may have been deleted — try the prefix as-is
+          fullIds.push(prefix);
+        }
+      }
+
+      const result = releaseLocks(path, fullIds, owner, force, doc);
+
+      const lines: string[] = [];
+      if (result.released.length > 0) {
+        lines.push(`Unlocked ${result.released.length} cell(s):`);
+        for (const id of result.released) lines.push(`  ${id.slice(0, 8)}`);
+      }
+      if (result.notOwned.length > 0) {
+        lines.push(`\n${result.notOwned.length} cell(s) owned by someone else (use force=true):`);
+        for (const id of result.notOwned) lines.push(`  ${id.slice(0, 8)}`);
+      }
+      if (result.notFound.length > 0) {
+        lines.push(`\n${result.notFound.length} cell(s) had no lock:`);
+        for (const id of result.notFound) lines.push(`  ${id.slice(0, 8)}`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") || "No cells to unlock." }],
+      };
     }
 
-    return {
-      content: [{ type: "text", text: lines.join("\n") }],
-    };
+    if (action === "list") {
+      const { doc } = await getNotebookCells(path);
+      const activeLocks = listLocksForPath(path, doc);
+
+      if (activeLocks.length === 0) {
+        return {
+          content: [{ type: "text", text: `No active locks on ${path}.` }],
+        };
+      }
+
+      const lines = [`${activeLocks.length} active lock(s) on ${path}:\n`];
+      for (const lock of activeLocks) {
+        const remaining = Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000);
+        lines.push(`  ${lock.cellId.slice(0, 8)} — owner: "${lock.owner}", expires in ${remaining}s`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+      };
+    }
+
+    throw new Error(`Unknown cell_locks action '${action}'. Must be one of: acquire, release, list.`);
   },
 
   "report_issue": async (args) => {
