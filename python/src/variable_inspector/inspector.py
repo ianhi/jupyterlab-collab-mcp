@@ -8,16 +8,76 @@ types where agents need machine-readable column/dtype metadata.
 
 Safety rules:
 - Never triggers lazy computation (polars LazyFrame .collect(), dask .compute())
+- Never triggers remote I/O (xarray backed by remote stores like icechunk/zarr)
 - Uses capped repr() for everything except known-dangerous types
 - All enumeration capped with itertools.islice
+- Per-variable timeout prevents any single variable from hanging
 """
 
 from __future__ import annotations
 
 import contextlib
+import signal
+import threading
 import types
 from itertools import islice
 from typing import Any
+
+
+# ---------------------------------------------------------------------------
+# Timeout guard — prevents any single inspection from hanging
+# ---------------------------------------------------------------------------
+
+_INSPECT_TIMEOUT_SECS = 2
+
+
+class _InspectTimeout(Exception):
+    pass
+
+
+def _with_timeout(fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, **kwargs: Any) -> Any:
+    """Run fn with a timeout. Returns result or raises _InspectTimeout.
+
+    Uses signal.SIGALRM on Unix (main thread only, zero overhead).
+    Falls back to threading on Windows or non-main threads.
+    """
+    # Try signal-based timeout (Unix, main thread only — zero overhead)
+    if hasattr(signal, "SIGALRM"):
+        try:
+            old_handler = signal.getsignal(signal.SIGALRM)
+
+            def _alarm_handler(signum: int, frame: Any) -> None:
+                raise _InspectTimeout()
+
+            signal.signal(signal.SIGALRM, _alarm_handler)
+            signal.alarm(int(timeout) or 1)
+            try:
+                result = fn(*args, **kwargs)
+            finally:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+            return result
+        except ValueError:
+            pass  # Not main thread — fall through to threading approach
+
+    # Fallback: thread-based timeout
+    result_box: list[Any] = []
+    error_box: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            result_box.append(fn(*args, **kwargs))
+        except Exception as e:
+            error_box.append(e)
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise _InspectTimeout()
+    if error_box:
+        raise error_box[0]
+    return result_box[0]
 
 
 def _safe_attr(obj: Any, name: str, default: Any = None) -> Any:
@@ -48,6 +108,9 @@ def _safe_repr(obj: Any, limit: int = 200) -> str:
     For large Python containers (dict/list/tuple/set), avoids calling repr()
     which would recursively repr every element — expensive if values are heavy
     objects like numpy arrays or DataFrames.
+
+    For xarray/dask objects backed by remote stores, repr() can trigger
+    network I/O, so we skip it entirely and return a type summary.
     """
     # Large containers: bail early to avoid expensive recursive repr
     if isinstance(obj, (dict, list, tuple, set, frozenset)):
@@ -57,6 +120,10 @@ def _safe_repr(obj: Any, limit: int = 200) -> str:
             n = None
         if n is not None and n > 20:
             return f"<{type(obj).__name__} with {n} items>"
+    # Remote-backed objects: repr() can trigger network I/O
+    mod = _module(obj)
+    if _is_potentially_remote(obj, mod):
+        return _type_summary_no_repr(obj, mod)
     try:
         r = repr(obj)
     except Exception:
@@ -64,6 +131,65 @@ def _safe_repr(obj: Any, limit: int = 200) -> str:
     if len(r) > limit:
         return r[: limit - 3] + "..."
     return r
+
+
+def _is_potentially_remote(obj: Any, mod: str | None = None) -> bool:
+    """Check if an object might be backed by a remote store.
+
+    Returns True for xarray objects with chunked/lazy backends, dask objects,
+    or anything with a suspicious _repr_html_ that might trigger loading.
+    """
+    if mod is None:
+        mod = _module(obj)
+    cls = _type_name(obj)
+
+    # dask is always lazy/remote
+    if mod.startswith("dask"):
+        return True
+
+    # xarray: check if any data variables are chunked (zarr, icechunk, etc.)
+    if mod.startswith("xarray"):
+        if cls in ("Dataset", "DataTree"):
+            # Check if any variable is chunked
+            data_vars = _safe_attr(obj, "data_vars", None)
+            if data_vars is not None:
+                for var_name in islice(data_vars, 3):  # sample first few
+                    with contextlib.suppress(Exception):
+                        var = data_vars[var_name]
+                        if _safe_attr(var, "chunks", None) is not None:
+                            return True
+            # DataTree: check the dataset attribute
+            if cls == "DataTree":
+                ds = _safe_attr(obj, "dataset", None)
+                if ds is not None:
+                    dv = _safe_attr(ds, "data_vars", None)
+                    if dv is not None:
+                        for var_name in islice(dv, 3):
+                            with contextlib.suppress(Exception):
+                                var = dv[var_name]
+                                if _safe_attr(var, "chunks", None) is not None:
+                                    return True
+            return False
+        if cls == "DataArray":
+            return _safe_attr(obj, "chunks", None) is not None
+    return False
+
+
+def _type_summary_no_repr(obj: Any, mod: str | None = None) -> str:
+    """Quick type summary without calling repr(). For remote-backed objects."""
+    if mod is None:
+        mod = _module(obj)
+    cls = _type_name(obj)
+    prefix = mod.split(".")[0] if mod else ""
+    label = f"{prefix}.{cls}" if prefix else cls
+    shape = _safe_attr(obj, "shape", None)
+    if shape is not None:
+        with contextlib.suppress(Exception):
+            return f"<{label} shape={tuple(shape)}>"
+    n = _safe_len(obj)
+    if n is not None:
+        return f"<{label} len={n}>"
+    return f"<{label}>"
 
 
 def _type_name(obj: Any) -> str:
@@ -224,6 +350,7 @@ def _inspect_xarray_dataset(
     name: str, obj: Any, max_items: int, max_name_length: int | None = 60
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"name": name, "type": "xarray.Dataset"}
+    # .sizes is a dict-like that's always precomputed (no I/O)
     sizes = _safe_attr(obj, "sizes", None)
     if sizes is not None:
         result["dims"] = dict(islice(sizes.items(), max_items))
@@ -231,12 +358,17 @@ def _inspect_xarray_dataset(
     if data_vars is not None:
         var_list = []
         for var_name in islice(data_vars, max_items):
-            var_info = {"name": _truncate_name(var_name, max_name_length)}
+            var_info: dict[str, Any] = {"name": _truncate_name(var_name, max_name_length)}
             with contextlib.suppress(Exception):
                 var_obj = data_vars[var_name]
+                # .dtype is safe on xarray variables (metadata, no data loading)
                 dtype = _safe_attr(var_obj, "dtype", None)
                 if dtype is not None:
                     var_info["dtype"] = str(dtype)
+                # Report chunked status for remote-backed variables
+                chunks = _safe_attr(var_obj, "chunks", None)
+                if chunks is not None:
+                    var_info["chunked"] = True
             var_list.append(var_info)
         result["data_vars"] = var_list
         total = _safe_len(data_vars)
@@ -245,6 +377,9 @@ def _inspect_xarray_dataset(
     coords = _safe_attr(obj, "coords", None)
     if coords is not None:
         result["coords"] = [_truncate_name(c, max_name_length) for c in islice(coords, max_items)]
+    # Flag if this dataset is backed by a remote/chunked store
+    if _is_potentially_remote(obj):
+        result["remote_backed"] = True
     return result
 
 
@@ -257,6 +392,10 @@ def _inspect_xarray_dataarray(name: str, obj: Any) -> dict[str, Any]:
     dtype = _safe_attr(obj, "dtype", None)
     if dtype is not None:
         result["dtype"] = str(dtype)
+    # Flag chunked/remote-backed arrays
+    chunks = _safe_attr(obj, "chunks", None)
+    if chunks is not None:
+        result["chunked"] = True
     return result
 
 
@@ -278,7 +417,7 @@ def _inspect_xarray_datatree(
         if data_vars is not None:
             var_list = []
             for var_name in islice(data_vars, max_items):
-                var_info = {"name": _truncate_name(var_name, max_name_length)}
+                var_info: dict[str, Any] = {"name": _truncate_name(var_name, max_name_length)}
                 with contextlib.suppress(Exception):
                     var_obj = data_vars[var_name]
                     dtype = _safe_attr(var_obj, "dtype", None)
@@ -289,8 +428,21 @@ def _inspect_xarray_datatree(
         sizes = _safe_attr(ds, "sizes", None)
         if sizes is not None:
             result["dims"] = dict(islice(sizes.items(), max_items))
+    # Count subtree nodes with a cap to avoid slow iteration on remote-backed trees
+    _MAX_SUBTREE_COUNT = 500
     with contextlib.suppress(Exception):
-        result["total_nodes"] = sum(1 for _ in obj.subtree)
+        count = 0
+        for _ in obj.subtree:
+            count += 1
+            if count >= _MAX_SUBTREE_COUNT:
+                break
+        if count >= _MAX_SUBTREE_COUNT:
+            result["total_nodes"] = f"{_MAX_SUBTREE_COUNT}+"
+        else:
+            result["total_nodes"] = count
+    # Flag remote-backed
+    if _is_potentially_remote(obj):
+        result["remote_backed"] = True
     return result
 
 
@@ -577,10 +729,28 @@ def list_user_variables(
     entries = entries[:max_variables]
 
     if detail == "schema":
-        return [summarize_one(vname, obj, max_items, max_name_length) for vname, obj in entries]
+        results_schema: list[str] = []
+        for vname, obj in entries:
+            try:
+                results_schema.append(
+                    _with_timeout(summarize_one, vname, obj, max_items, max_name_length)
+                )
+            except (_InspectTimeout, Exception):
+                results_schema.append(f"{vname}: {_type_name(obj)} (inspection timed out)")
+        return results_schema
 
     if detail == "full":
-        return [inspect_one(vname, obj, max_items, max_name_length) for vname, obj in entries]
+        results_full: list[dict[str, Any]] = []
+        for vname, obj in entries:
+            try:
+                results_full.append(
+                    _with_timeout(inspect_one, vname, obj, max_items, max_name_length)
+                )
+            except _InspectTimeout:
+                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection timed out"})
+            except Exception:
+                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection failed"})
+        return results_full
 
     # basic — current behavior
     result: list[dict[str, Any]] = []

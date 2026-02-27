@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import numpy as np
+import pytest
 import xarray as xr
 
 from variable_inspector.inspector import inspect_one, summarize_one
@@ -287,3 +288,123 @@ class TestXarrayPerformance:
         summarize_one("ds", ds, max_items=20)
         elapsed_ms = (time.perf_counter() - start) * 1000
         assert elapsed_ms < 5
+
+
+# ---------------------------------------------------------------------------
+# Chunked / remote-backed datasets (simulated)
+# ---------------------------------------------------------------------------
+
+
+try:
+    import dask  # noqa: F401
+    _has_dask = True
+except ImportError:
+    _has_dask = False
+
+_requires_dask = pytest.mark.skipif(not _has_dask, reason="dask not installed")
+
+
+@_requires_dask
+class TestChunkedDataset:
+    """Test that chunked xarray objects (like those backed by zarr/icechunk)
+    are handled safely without triggering data loading."""
+
+    def _make_chunked_dataset(self) -> xr.Dataset:
+        """Create a chunked dataset (simulates remote-backed data)."""
+        ds = xr.Dataset(
+            {f"var_{i}": (["time", "x"], np.zeros((100, 50))) for i in range(10)},
+            coords={"time": np.arange(100), "x": np.arange(50)},
+        )
+        return ds.chunk({"time": 10, "x": 10})
+
+    def test_inspect_chunked_dataset(self) -> None:
+        ds = self._make_chunked_dataset()
+        info = inspect_one("ds", ds)
+        assert info["type"] == "xarray.Dataset"
+        assert info.get("remote_backed") is True
+        # Should still have dims and data_vars
+        assert "time" in info["dims"]
+        assert len(info["data_vars"]) == 10
+        # Variables should be flagged as chunked
+        assert any(v.get("chunked") for v in info["data_vars"])
+
+    def test_inspect_chunked_dataarray(self) -> None:
+        da = xr.DataArray(
+            np.zeros((100, 50)), dims=["time", "x"]
+        ).chunk({"time": 10})
+        info = inspect_one("da", da)
+        assert info["type"] == "xarray.DataArray"
+        assert info.get("chunked") is True
+        assert info["dims"] == {"time": 100, "x": 50}
+
+    def test_chunked_repr_no_data_load(self) -> None:
+        """_safe_repr on chunked dataset should not call repr()."""
+        from variable_inspector.inspector import _safe_repr
+        ds = self._make_chunked_dataset()
+        r = _safe_repr(ds, 200)
+        # Should be a type summary, not a full repr
+        assert r.startswith("<")
+        assert "Dataset" in r
+
+    def test_chunked_in_basic_listing(self) -> None:
+        """Chunked objects in basic mode should not hang."""
+        from variable_inspector.inspector import list_user_variables
+        ds = self._make_chunked_dataset()
+        ns = {"ds": ds, "x": 42}
+        result = list_user_variables(ns, detail="basic")
+        assert len(result) == 2  # type: ignore[arg-type]
+        ds_entry = [r for r in result if r["name"] == "ds"][0]  # type: ignore[union-attr]
+        assert ds_entry["type"] == "Dataset"
+        # repr should be a type summary, not full repr
+        assert "<" in ds_entry["repr"]
+
+    def test_chunked_in_schema_listing(self) -> None:
+        from variable_inspector.inspector import list_user_variables
+        ds = self._make_chunked_dataset()
+        ns = {"ds": ds}
+        result = list_user_variables(ns, detail="schema")
+        assert len(result) == 1
+        assert "xarray.Dataset" in result[0]
+
+    def test_chunked_performance(self) -> None:
+        ds = self._make_chunked_dataset()
+        start = time.perf_counter()
+        inspect_one("ds", ds)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        assert elapsed_ms < 10, f"Chunked dataset inspection took {elapsed_ms:.2f}ms"
+
+
+class TestChunkedDetectionWithoutDask:
+    """Test that _is_potentially_remote works even without dask,
+    by mocking the .chunks attribute."""
+
+    def test_dataset_with_mocked_chunks(self) -> None:
+        """Simulate a chunked dataset by setting .chunks on variables."""
+        from variable_inspector.inspector import _is_potentially_remote, _safe_repr
+        ds = xr.Dataset(
+            {"temp": (["time", "x"], np.zeros((10, 5)))},
+            coords={"time": np.arange(10), "x": np.arange(5)},
+        )
+        # Monkey-patch .chunks to simulate chunked backing
+        ds["temp"].encoding["chunks"] = (5, 5)
+        # Override the variable's chunks property
+        original_var = ds["temp"].variable
+        original_var._data = type("FakeChunked", (), {
+            "shape": (10, 5),
+            "dtype": np.float64,
+            "chunks": ((5, 5), (5,)),
+            "__getitem__": lambda self, key: np.zeros((10, 5))[key],
+        })()
+
+        info = inspect_one("ds", ds)
+        assert info["type"] == "xarray.Dataset"
+        # The variable should be detected as chunked
+        assert any(v.get("chunked") for v in info["data_vars"])
+
+    def test_non_chunked_dataset_not_flagged(self) -> None:
+        """Regular in-memory datasets should not be flagged."""
+        from variable_inspector.inspector import _is_potentially_remote
+        ds = xr.Dataset(
+            {"temp": (["time"], np.zeros(100))},
+        )
+        assert _is_potentially_remote(ds) is False
