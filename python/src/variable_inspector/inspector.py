@@ -23,7 +23,6 @@ import types
 from itertools import islice
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Timeout guard — prevents any single inspection from hanging
 # ---------------------------------------------------------------------------
@@ -35,7 +34,9 @@ class _InspectTimeout(Exception):
     pass
 
 
-def _with_timeout(fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, **kwargs: Any) -> Any:
+def _with_timeout(
+    fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, **kwargs: Any
+) -> Any:
     """Run fn with a timeout. Returns result or raises _InspectTimeout.
 
     Uses signal.SIGALRM on Unix (main thread only, zero overhead).
@@ -747,9 +748,13 @@ def list_user_variables(
                     _with_timeout(inspect_one, vname, obj, max_items, max_name_length)
                 )
             except _InspectTimeout:
-                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection timed out"})
+                results_full.append(
+                    {"name": vname, "type": _type_name(obj), "error": "inspection timed out"}
+                )
             except Exception:
-                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection failed"})
+                results_full.append(
+                    {"name": vname, "type": _type_name(obj), "error": "inspection failed"}
+                )
         return results_full
 
     # basic — current behavior

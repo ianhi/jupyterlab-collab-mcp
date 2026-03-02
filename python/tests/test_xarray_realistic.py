@@ -297,6 +297,7 @@ class TestXarrayPerformance:
 
 try:
     import dask  # noqa: F401
+
     _has_dask = True
 except ImportError:
     _has_dask = False
@@ -329,9 +330,7 @@ class TestChunkedDataset:
         assert any(v.get("chunked") for v in info["data_vars"])
 
     def test_inspect_chunked_dataarray(self) -> None:
-        da = xr.DataArray(
-            np.zeros((100, 50)), dims=["time", "x"]
-        ).chunk({"time": 10})
+        da = xr.DataArray(np.zeros((100, 50)), dims=["time", "x"]).chunk({"time": 10})
         info = inspect_one("da", da)
         assert info["type"] == "xarray.DataArray"
         assert info.get("chunked") is True
@@ -340,6 +339,7 @@ class TestChunkedDataset:
     def test_chunked_repr_no_data_load(self) -> None:
         """_safe_repr on chunked dataset should not call repr()."""
         from variable_inspector.inspector import _safe_repr
+
         ds = self._make_chunked_dataset()
         r = _safe_repr(ds, 200)
         # Should be a type summary, not a full repr
@@ -349,6 +349,7 @@ class TestChunkedDataset:
     def test_chunked_in_basic_listing(self) -> None:
         """Chunked objects in basic mode should not hang."""
         from variable_inspector.inspector import list_user_variables
+
         ds = self._make_chunked_dataset()
         ns = {"ds": ds, "x": 42}
         result = list_user_variables(ns, detail="basic")
@@ -360,6 +361,7 @@ class TestChunkedDataset:
 
     def test_chunked_in_schema_listing(self) -> None:
         from variable_inspector.inspector import list_user_variables
+
         ds = self._make_chunked_dataset()
         ns = {"ds": ds}
         result = list_user_variables(ns, detail="schema")
@@ -380,7 +382,6 @@ class TestChunkedDetectionWithoutDask:
 
     def test_dataset_with_mocked_chunks(self) -> None:
         """Simulate a chunked dataset by setting .chunks on variables."""
-        from variable_inspector.inspector import _is_potentially_remote, _safe_repr
         ds = xr.Dataset(
             {"temp": (["time", "x"], np.zeros((10, 5)))},
             coords={"time": np.arange(10), "x": np.arange(5)},
@@ -389,12 +390,16 @@ class TestChunkedDetectionWithoutDask:
         ds["temp"].encoding["chunks"] = (5, 5)
         # Override the variable's chunks property
         original_var = ds["temp"].variable
-        original_var._data = type("FakeChunked", (), {
-            "shape": (10, 5),
-            "dtype": np.float64,
-            "chunks": ((5, 5), (5,)),
-            "__getitem__": lambda self, key: np.zeros((10, 5))[key],
-        })()
+        original_var._data = type(
+            "FakeChunked",
+            (),
+            {
+                "shape": (10, 5),
+                "dtype": np.float64,
+                "chunks": ((5, 5), (5,)),
+                "__getitem__": lambda self, key: np.zeros((10, 5))[key],
+            },
+        )()
 
         info = inspect_one("ds", ds)
         assert info["type"] == "xarray.Dataset"
@@ -404,6 +409,7 @@ class TestChunkedDetectionWithoutDask:
     def test_non_chunked_dataset_not_flagged(self) -> None:
         """Regular in-memory datasets should not be flagged."""
         from variable_inspector.inspector import _is_potentially_remote
+
         ds = xr.Dataset(
             {"temp": (["time"], np.zeros(100))},
         )
