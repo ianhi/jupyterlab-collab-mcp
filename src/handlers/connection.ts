@@ -24,12 +24,17 @@ export const handlers: Record<
     const { url } = args as { url: string };
     const parsed = parseJupyterUrl(url);
 
+    const isHttps = parsed.protocol === "https:";
+    const httpScheme = isHttps ? "https" : "http";
+    const wsScheme = isHttps ? "wss" : "ws";
+    // Include the proxy path prefix (if any) so all subsequent requests go
+    // through the same proxy mount point (e.g. /proxy/abc on Coiled).
     const config = {
       host: parsed.host,
       port: parsed.port,
       token: parsed.token,
-      baseUrl: `http://${parsed.host}:${parsed.port}`,
-      wsUrl: `ws://${parsed.host}:${parsed.port}`,
+      baseUrl: `${httpScheme}://${parsed.host}:${parsed.port}${parsed.basePath}`,
+      wsUrl: `${wsScheme}://${parsed.host}:${parsed.port}${parsed.basePath}`,
     };
     setJupyterConfig(config);
 

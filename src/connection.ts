@@ -27,7 +27,15 @@ export type JupyterConfig = {
   host: string;
   port: number;
   token: string;
+  /**
+   * Base HTTP URL including any proxy path prefix (no trailing slash).
+   * e.g. "http://localhost:8888" or "https://cluster.coiled.io/proxy/abc".
+   */
   baseUrl: string;
+  /**
+   * Base WebSocket URL including any proxy path prefix (no trailing slash).
+   * e.g. "ws://localhost:8888" or "wss://cluster.coiled.io/proxy/abc".
+   */
   wsUrl: string;
 };
 
@@ -69,7 +77,7 @@ export let lspStatus: LspStatus = { available: false, servers: new Map() };
 export async function checkLspAvailability(): Promise<LspStatus> {
   const config = getConfig();
   try {
-    const url = new URL("/lsp/status", config.baseUrl);
+    const url = new URL(`${config.baseUrl}/lsp/status`);
     url.searchParams.set("token", config.token);
     const response = await fetch(url.toString());
     if (response.ok) {
@@ -190,7 +198,10 @@ export async function apiFetch(
   options: RequestInit = {}
 ): Promise<Response> {
   const config = getConfig();
-  const url = new URL(endpoint, config.baseUrl);
+  // Concatenate so any proxy prefix in baseUrl is preserved
+  // (`new URL(endpoint, base)` replaces base's pathname).
+  const normalized = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = new URL(`${config.baseUrl}${normalized}`);
   url.searchParams.set("token", config.token);
 
   const headers = new Headers(options.headers);

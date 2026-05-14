@@ -211,16 +211,18 @@ describe("resolveCellIndices", () => {
 describe("parseJupyterUrl", () => {
   it("parses localhost URL with token", () => {
     const result = parseJupyterUrl("http://localhost:8888/lab?token=abc123");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       host: "localhost",
       port: 8888,
       token: "abc123",
+      protocol: "http:",
+      basePath: "",
     });
   });
 
   it("parses URL without explicit port (http defaults to 80)", () => {
     const result = parseJupyterUrl("http://example.com/lab?token=xyz");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       host: "example.com",
       port: 80,
       token: "xyz",
@@ -229,10 +231,22 @@ describe("parseJupyterUrl", () => {
 
   it("parses https URL (defaults to 443)", () => {
     const result = parseJupyterUrl("https://jupyter.example.com/lab?token=secure");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       host: "jupyter.example.com",
       port: 443,
       token: "secure",
+      protocol: "https:",
+    });
+  });
+
+  it("preserves base path for proxied jupyter (e.g. coiled /jupyter/lab)", () => {
+    const result = parseJupyterUrl("https://cluster-x.dask.host/jupyter/lab?token=t");
+    expect(result).toMatchObject({
+      host: "cluster-x.dask.host",
+      port: 443,
+      token: "t",
+      protocol: "https:",
+      basePath: "/jupyter",
     });
   });
 
@@ -248,7 +262,7 @@ describe("parseJupyterUrl", () => {
 
   it("parses URL with custom port on https", () => {
     const result = parseJupyterUrl("https://example.com:9999/lab?token=test");
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       host: "example.com",
       port: 9999,
       token: "test",
