@@ -71,6 +71,13 @@ export interface Run {
   html: string[];
   /** Final error message if state === "failed". */
   errorMessage?: string;
+  /**
+   * True if this run was at some point returned to the caller as a handoff
+   * (i.e. `RunOutcome` with kind === "handoff"). Even after the run later
+   * completes, this flag stays set so the notification layer can know it
+   * needs to push a `<channel>` tag.
+   */
+  wasHandedOff: boolean;
 }
 
 /** Partial result returned when a run is handed off mid-execution. */
@@ -239,6 +246,7 @@ export class KernelClient {
         html: [],
         status: "ok",
         executionCount: null,
+        wasHandedOff: false,
       } as Run;
       // `textParts` is internal accumulation; store it on the run record so
       // we can recompute `text` lazily, but expose only `text`.
@@ -281,6 +289,7 @@ export class KernelClient {
           // Hand off — but keep the in-flight entry alive.
           if (!inflight.outcomeResolve) return;
           inflight.wasHandedOff = true;
+          run.wasHandedOff = true;
           run.state = "handed_off";
           const partial: PartialResult = {
             status: run.status,

@@ -11,6 +11,7 @@ import * as Y from "yjs";
 import crypto from "node:crypto";
 import { type ExecutionResult } from "./helpers.js";
 import { KernelClient } from "./kernel-client.js";
+import { notifyHandoffComplete } from "./notifications.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -391,6 +392,19 @@ export function getKernelClient(kernelId: string): KernelClient {
         kernelClients.delete(kernelId);
       }
     },
+  });
+  // Push channel notification when a previously handed-off run finishes.
+  // Runs that complete inline never had `wasHandedOff === true`, so they
+  // produce no notification.
+  client.onRunSettled((run) => {
+    if (!run.wasHandedOff) return;
+    notifyHandoffComplete({
+      run_id: run.id,
+      kernel_id: run.kernelId,
+      status: run.status,
+      execution_count: run.executionCount,
+      first_line: run.text ? run.text.split("\n")[0].slice(0, 120) : undefined,
+    });
   });
   kernelClients.set(kernelId, client);
   ensureIdleSweep();
