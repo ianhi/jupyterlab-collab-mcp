@@ -9,7 +9,8 @@ import WebSocket from "ws";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";
 import crypto from "node:crypto";
-import { stripAnsi, type NotebookOutput, type ExecutionResult } from "./helpers.js";
+import { type ExecutionResult } from "./helpers.js";
+import { KernelClient } from "./kernel-client.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -336,154 +337,91 @@ export async function connectToNotebook(
 }
 
 // ============================================================================
-// Kernel execution
+// Kernel execution — long-lived KernelClient pool
 // ============================================================================
 
+/**
+ * Pool of long-lived kernel clients keyed by kernelId. Each client owns a
+ * single multiplexed WebSocket to /api/kernels/{id}/channels. Callers should
+ * always go through `executeCode()` / `getKernelClient()` so eviction and
+ * close-handling stay consistent.
+ */
+export const kernelClients = new Map<string, KernelClient>();
+
+/**
+ * Idle eviction window. A client whose `lastActivityAt` is older than this
+ * is closed and removed on the next sweep so we don't leak sockets for
+ * kernels the user has forgotten about.
+ */
+const IDLE_EVICTION_MS = 5 * 60 * 1000;
+const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
+
+let idleSweepTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensureIdleSweep(): void {
+  if (idleSweepTimer) return;
+  idleSweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [kernelId, client] of kernelClients) {
+      if (now - client.lastActivityAt > IDLE_EVICTION_MS) {
+        client.close("idle eviction");
+        // onClose handler removes from the map, but be defensive.
+        kernelClients.delete(kernelId);
+      }
+    }
+  }, IDLE_SWEEP_INTERVAL_MS);
+  // Don't keep the process alive solely for the sweep.
+  idleSweepTimer.unref?.();
+}
+
+/**
+ * Return the pooled KernelClient for `kernelId`, creating one if needed.
+ * The client's WebSocket opens lazily on first `run()`.
+ */
+export function getKernelClient(kernelId: string): KernelClient {
+  const existing = kernelClients.get(kernelId);
+  if (existing) return existing;
+
+  const config = getConfig();
+  const client = new KernelClient(kernelId, config, {
+    onClose: () => {
+      // Remove only if the entry still points at *this* client — a fresh
+      // client may have replaced it already.
+      if (kernelClients.get(kernelId) === client) {
+        kernelClients.delete(kernelId);
+      }
+    },
+  });
+  kernelClients.set(kernelId, client);
+  ensureIdleSweep();
+  return client;
+}
+
+/**
+ * Close and remove the pooled client for `kernelId`, if any. Intended to be
+ * wired into restart_kernel and disconnect flows in Phase 2 — currently
+ * unwired so behaviour is identical to the old per-call implementation.
+ */
+export function closeKernelClient(kernelId: string, reason: string = "explicit close"): void {
+  const client = kernelClients.get(kernelId);
+  if (!client) return;
+  kernelClients.delete(kernelId);
+  client.close(reason);
+}
+
+/**
+ * Execute `code` on `kernelId` and resolve with the collected outputs.
+ *
+ * Thin wrapper over a pooled `KernelClient` — the WebSocket is opened once
+ * per kernel and reused. Same external contract as before: rejects on
+ * timeout, returns ExecutionResult on success or kernel-side error.
+ */
 export async function executeCode(
   kernelId: string,
   code: string,
   timeoutMs: number = 30000
 ): Promise<ExecutionResult> {
-  const config = getConfig();
-  return new Promise((resolve, reject) => {
-    const wsUrlWithToken = `${config.wsUrl}/api/kernels/${kernelId}/channels?token=${config.token}`;
-    const ws = new WebSocket(wsUrlWithToken);
-
-    const msgId = crypto.randomUUID();
-    const outputs: NotebookOutput[] = [];
-    const textParts: string[] = [];
-    const images: { data: string; mimeType: string }[] = [];
-    const htmlParts: string[] = [];
-    let status: "ok" | "error" = "ok";
-    let executionCount: number | null = null;
-
-    const timeoutSecs = Math.round(timeoutMs / 1000);
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    ws.on("open", () => {
-      // Start timeout only after WebSocket connects and request is sent
-      timeoutId = setTimeout(() => {
-        ws.close();
-        reject(new Error(`Execution timeout after ${timeoutSecs} seconds`));
-      }, timeoutMs);
-      const msg = {
-        header: {
-          msg_id: msgId,
-          msg_type: "execute_request",
-          username: "claude",
-          session: crypto.randomUUID(),
-          date: new Date().toISOString(),
-          version: "5.3",
-        },
-        parent_header: {},
-        metadata: {},
-        content: {
-          code,
-          silent: false,
-          store_history: true,
-          user_expressions: {},
-          allow_stdin: false,
-          stop_on_error: true,
-        },
-        buffers: [],
-        channel: "shell",
-      };
-      ws.send(JSON.stringify(msg));
-    });
-
-    ws.on("message", (data: WebSocket.Data) => {
-      const msg = JSON.parse(data.toString());
-      if (msg.parent_header?.msg_id !== msgId) return;
-
-      switch (msg.msg_type) {
-        case "stream":
-          outputs.push({
-            output_type: "stream",
-            name: msg.content.name,
-            text: msg.content.text,
-          });
-          textParts.push(stripAnsi(msg.content.text));
-          break;
-
-        case "execute_result":
-          outputs.push({
-            output_type: "execute_result",
-            execution_count: msg.content.execution_count,
-            data: msg.content.data,
-            metadata: msg.content.metadata || {},
-          });
-          // Extract text
-          textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
-          // Extract images
-          if (msg.content.data?.["image/png"]) {
-            images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
-          }
-          if (msg.content.data?.["image/jpeg"]) {
-            images.push({ data: msg.content.data["image/jpeg"], mimeType: "image/jpeg" });
-          }
-          // Extract HTML (for rich reprs like pandas, xarray)
-          if (msg.content.data?.["text/html"]) {
-            htmlParts.push(msg.content.data["text/html"]);
-          }
-          break;
-
-        case "display_data":
-          outputs.push({
-            output_type: "display_data",
-            data: msg.content.data,
-            metadata: msg.content.metadata || {},
-          });
-          textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
-          // Extract images from display_data (matplotlib, etc.)
-          if (msg.content.data?.["image/png"]) {
-            images.push({ data: msg.content.data["image/png"], mimeType: "image/png" });
-          }
-          if (msg.content.data?.["image/jpeg"]) {
-            images.push({ data: msg.content.data["image/jpeg"], mimeType: "image/jpeg" });
-          }
-          if (msg.content.data?.["text/html"]) {
-            htmlParts.push(msg.content.data["text/html"]);
-          }
-          break;
-
-        case "error":
-          status = "error";
-          outputs.push({
-            output_type: "error",
-            ename: msg.content.ename,
-            evalue: msg.content.evalue,
-            traceback: msg.content.traceback,
-          });
-          textParts.push(stripAnsi(`${msg.content.ename}: ${msg.content.evalue}`));
-          break;
-
-        case "execute_reply":
-          executionCount = msg.content.execution_count;
-          clearTimeout(timeoutId);
-          ws.close();
-          resolve({
-            status,
-            executionCount,
-            outputs,
-            text: textParts.join(""),
-            images,
-            html: htmlParts,
-          });
-          break;
-      }
-    });
-
-    ws.on("error", (err) => {
-      clearTimeout(timeoutId);
-      reject(err);
-    });
-
-    ws.on("close", () => {
-      clearTimeout(timeoutId);
-      // If neither resolve nor reject was called yet, reject on unexpected close
-      reject(new Error("WebSocket closed unexpectedly before execution completed"));
-    });
-  });
+  return getKernelClient(kernelId).run(code, timeoutMs);
 }
 
 // ============================================================================
