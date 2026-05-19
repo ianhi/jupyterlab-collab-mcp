@@ -425,6 +425,11 @@ export const toolSchemas = [
         timeout: { type: "number", description: "Timeout ms (per cell in range). Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
+        handoff_after_ms: {
+          type: "number",
+          description:
+            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output.",
+        },
       },
       required: ["path"],
     },
@@ -441,8 +446,31 @@ export const toolSchemas = [
         timeout: { type: "number", description: "Timeout ms. Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
+        handoff_after_ms: {
+          type: "number",
+          description:
+            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output.",
+        },
       },
       required: ["path", "code"],
+    },
+  },
+  {
+    name: "get_cell_run_output",
+    description:
+      "Fetch output for a run started by execute_cell/execute_code (typically one that handed off via handoff_after_ms). Works for runs still executing AND completed runs — also the right tool to call when a <channel source=\"jupyter\"> notification fires.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        run_id: { type: "string", description: "Run identifier returned by a handed-off execute call" },
+        kernel_id: {
+          type: "string",
+          description: "Optional: kernel ID to disambiguate. If omitted, all pooled kernels are searched.",
+        },
+        max_images: { type: "number", description: "Max images to return" },
+        include_images: { type: "boolean", description: "Return images. Default: true" },
+      },
+      required: ["run_id"],
     },
   },
   {

@@ -429,6 +429,36 @@ export async function executeCode(
   );
 }
 
+/**
+ * Execute `code` with optional graceful handoff. Returns the full RunOutcome
+ * so the handler can decide how to report partial-vs-complete to the agent.
+ */
+export async function executeCodeWithHandoff(
+  kernelId: string,
+  code: string,
+  opts: { timeoutMs?: number; handoffAfterMs?: number }
+): Promise<import("./kernel-client.js").RunOutcome> {
+  return getKernelClient(kernelId).run(code, opts);
+}
+
+/** Look up a run across every pooled KernelClient (or just one if kernelId is supplied). */
+export function findRun(
+  runId: string,
+  kernelId?: string
+): { client: KernelClient; run: import("./kernel-client.js").Run } | undefined {
+  if (kernelId) {
+    const client = kernelClients.get(kernelId);
+    if (!client) return undefined;
+    const run = client.getRun(runId);
+    return run ? { client, run } : undefined;
+  }
+  for (const client of kernelClients.values()) {
+    const run = client.getRun(runId);
+    if (run) return { client, run };
+  }
+  return undefined;
+}
+
 // ============================================================================
 // Execution output cache (for filter_output tool)
 // ============================================================================

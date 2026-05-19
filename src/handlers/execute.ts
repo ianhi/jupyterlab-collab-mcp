@@ -15,11 +15,28 @@ import {
   type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
-import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, cacheExecution, getCachedExecution } from "../connection.js";
+import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, executeCodeWithHandoff, findRun, cacheExecution, getCachedExecution } from "../connection.js";
+import type { ExecutionResult } from "../helpers.js";
+
+function formatHandoffMessage(
+  runId: string,
+  handoffMs: number,
+  partialText: string
+): string {
+  const lines = partialText ? partialText.split("\n") : [];
+  const preview = lines.slice(0, 20).join("\n");
+  const more = lines.length > 20 ? `\n... (${lines.length - 20} more lines)` : "";
+  return (
+    `⏱ Execution exceeded ${handoffMs}ms — handed off.\n` +
+    `run_id: ${runId}\n` +
+    `Partial output (${lines.length} lines):\n${preview}${more}\n` +
+    `You'll be notified when the run terminates; fetch the result with get_cell_run_output(run_id="${runId}").`
+  );
+}
 
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "execute_cell": async (args) => {
-    const { path, index, cell_id, end_index, cell_ids, timeout, max_images, include_images } = args as {
+    const { path, index, cell_id, end_index, cell_ids, timeout, max_images, include_images, handoff_after_ms } = args as {
       path: string;
       index?: number;
       cell_id?: string;
@@ -28,6 +45,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      handoff_after_ms?: number;
     };
 
     const sessions = await listNotebookSessions();
@@ -83,18 +101,58 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
 
         try {
-          const result = await executeCode(session.kernelId, source, timeoutMs);
-          updateCellOutputs(cell, result);
-          const filteredOutput = result.text
-            ? filterOutputText(result.text, { max_output_lines: 5 }).text
-            : undefined;
-          cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
-          results.push({
-            index: i,
-            cellId: cid,
-            status: result.status,
-            output: filteredOutput,
-          });
+          if (handoff_after_ms !== undefined) {
+            const outcome = await executeCodeWithHandoff(session.kernelId, source, {
+              timeoutMs,
+              handoffAfterMs: handoff_after_ms,
+            });
+            if (outcome.kind === "handoff") {
+              // Stop range execution at the first handoff — the agent should
+              // get back the run_id and decide what to do next.
+              results.push({
+                index: i,
+                cellId: cid,
+                status: `handed_off (run_id=${outcome.runId})`,
+                output: outcome.partial.text?.slice(0, 500),
+              });
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text:
+                      `Range execution paused at cell ${i} — handed off after ${handoff_after_ms}ms.\n` +
+                      formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
+                      `\n\nResults so far:\n${JSON.stringify(results, null, 2)}`,
+                  },
+                ],
+              };
+            }
+            const result = outcome.result;
+            updateCellOutputs(cell, result);
+            const filteredOutput = result.text
+              ? filterOutputText(result.text, { max_output_lines: 5 }).text
+              : undefined;
+            cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
+            results.push({
+              index: i,
+              cellId: cid,
+              status: result.status,
+              output: filteredOutput,
+            });
+          } else {
+            const result = await executeCode(session.kernelId, source, timeoutMs);
+            updateCellOutputs(cell, result);
+            const filteredOutput = result.text
+              ? filterOutputText(result.text, { max_output_lines: 5 }).text
+              : undefined;
+            cacheExecution(path, { text: result.text, images: result.images, cellIndex: i, cellId: cid });
+            results.push({
+              index: i,
+              cellId: cid,
+              status: result.status,
+              output: filteredOutput,
+            });
+          }
         } catch (err: any) {
           results.push({ index: i, cellId: cid, status: `error: ${err.message}` });
         }
@@ -131,6 +189,30 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const cell = cells.get(resolvedIndex) as Y.Map<any>;
     const cellIdStr = getCellId(cell);
     const source = extractSource(cell);
+
+    if (handoff_after_ms !== undefined) {
+      const outcome = await executeCodeWithHandoff(session.kernelId, source, {
+        timeoutMs,
+        handoffAfterMs: handoff_after_ms,
+      });
+      if (outcome.kind === "handoff") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+            },
+          ],
+        };
+      }
+      const result = outcome.result;
+      if (cell instanceof Y.Map) updateCellOutputs(cell, result);
+      const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: resolvedIndex, cellId: cellIdStr });
+      const content = buildExecutionContent(result, "", { max_images, include_images });
+      content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+      return { content };
+    }
+
     const result = await executeCode(session.kernelId, source, timeoutMs);
 
     // Update cell outputs in the notebook
@@ -145,12 +227,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "execute_code": async (args) => {
-    const { path, code, timeout, max_images, include_images } = args as {
+    const { path, code, timeout, max_images, include_images, handoff_after_ms } = args as {
       path: string;
       code: string;
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      handoff_after_ms?: number;
     };
 
     const sessions = await listNotebookSessions();
@@ -163,10 +246,92 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
 
     const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+
+    if (handoff_after_ms !== undefined) {
+      const outcome = await executeCodeWithHandoff(session.kernelId, code, {
+        timeoutMs,
+        handoffAfterMs: handoff_after_ms,
+      });
+      if (outcome.kind === "handoff") {
+        return {
+          content: [
+            {
+              type: "text",
+              text: formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text),
+            },
+          ],
+        };
+      }
+      const result = outcome.result;
+      const executionId = cacheExecution(path, { text: result.text, images: result.images });
+      const content = buildExecutionContent(result, "", { max_images, include_images });
+      content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+      return { content };
+    }
+
     const result = await executeCode(session.kernelId, code, timeoutMs);
     const executionId = cacheExecution(path, { text: result.text, images: result.images });
     const content = buildExecutionContent(result, "", { max_images, include_images });
     content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+    return { content };
+  },
+
+  "get_cell_run_output": async (args) => {
+    const { run_id, kernel_id, max_images, include_images } = args as {
+      run_id: string;
+      kernel_id?: string;
+      max_images?: number;
+      include_images?: boolean;
+    };
+    if (!run_id) {
+      throw new Error("'run_id' is required.");
+    }
+    const found = findRun(run_id, kernel_id);
+    if (!found) {
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `No run found for run_id="${run_id}"` +
+              (kernel_id ? ` on kernel ${kernel_id}.` : ` in any pooled kernel.`) +
+              ` It may have been evicted from history (retention is ~100 runs / 30 min).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    const { client, run } = found;
+    if (run.state === "queued" || run.state === "running" || run.state === "handed_off") {
+      const lines = run.text ? run.text.split("\n").length : 0;
+      const previewLines = run.text ? run.text.split("\n").slice(0, 20).join("\n") : "(no output yet)";
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `Run ${run_id} on kernel ${client.kernelId} is still ${run.state}.\n` +
+              `Partial output (${lines} lines):\n${previewLines}\n` +
+              `Call get_cell_run_output again later, or wait for the <channel source="jupyter"> notification.`,
+          },
+        ],
+      };
+    }
+    // Terminal state: completed or failed
+    const result: ExecutionResult = {
+      status: run.status,
+      executionCount: run.executionCount,
+      outputs: run.outputs,
+      text: run.text,
+      images: run.images,
+      html: run.html,
+    };
+    const content = buildExecutionContent(result, "", { max_images, include_images });
+    const header =
+      run.state === "completed"
+        ? `Run ${run_id} on kernel ${client.kernelId} completed (status=${run.status}).\n`
+        : `Run ${run_id} on kernel ${client.kernelId} failed: ${run.errorMessage ?? "(no message)"}\n`;
+    content[0].text = header + content[0].text;
     return { content };
   },
 
