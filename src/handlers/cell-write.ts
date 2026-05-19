@@ -27,14 +27,31 @@ import {
   listNotebookSessions,
   connectToNotebook,
   executeCode,
+  executeCodeWithHandoff,
   cacheExecution,
 } from "../connection.js";
 import { recordChange } from "../cell-tracker.js";
 import { checkLock } from "../cell-locks.js";
 
+function formatHandoffMessage(
+  runId: string,
+  handoffMs: number,
+  partialText: string
+): string {
+  const lines = partialText ? partialText.split("\n") : [];
+  const preview = lines.slice(0, 20).join("\n");
+  const more = lines.length > 20 ? `\n... (${lines.length - 20} more lines)` : "";
+  return (
+    `⏱ Execution exceeded ${handoffMs}ms — handed off.\n` +
+    `run_id: ${runId}\n` +
+    `Partial output (${lines.length} lines):\n${preview}${more}\n` +
+    `You'll be notified when the run terminates; fetch the result with get_cell_run_output(run_id="${runId}").`
+  );
+}
+
 export const handlers: Record<string, (args: Record<string, unknown>) => Promise<ToolResult>> = {
   "insert_cell": async (args) => {
-    const { path, index, cell_id, source, cell_type = "code", execute, timeout, max_images, include_images, client_name } = args as {
+    const { path, index, cell_id, source, cell_type = "code", execute, timeout, max_images, include_images, handoff_after_ms, client_name } = args as {
       path: string;
       index?: number;
       cell_id?: string;
@@ -44,6 +61,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       timeout?: number;
       max_images?: number;
       include_images?: boolean;
+      handoff_after_ms?: number;
       client_name?: string;
     };
     const clientId = client_name || "claude-code";
@@ -155,6 +173,34 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         );
       }
       const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+      if (handoff_after_ms !== undefined) {
+        const outcome = await executeCodeWithHandoff(session.kernelId, source, {
+          timeoutMs,
+          handoffAfterMs: handoff_after_ms,
+        });
+        if (outcome.kind === "handoff") {
+          const warn = getPeerWarning(provider);
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `✓ Inserted cell at index ${insertIndex} (id: ${newId}) in ${path}\n` +
+                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
+                  (warn ?? ""),
+              },
+            ],
+          };
+        }
+        const result = outcome.result;
+        updateCellOutputs(newCell, result);
+        const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: insertIndex, cellId: newCellId });
+        const content = buildExecutionContent(result, `Inserted and executed cell at index ${insertIndex} (id: ${newId}) in ${path}\n\nOutput:\n`, { max_images, include_images });
+        content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+        const warn = getPeerWarning(provider);
+        if (warn) content[0].text += warn;
+        return { content };
+      }
       const result = await executeCode(session.kernelId, source, timeoutMs);
       updateCellOutputs(newCell, result);
       const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: insertIndex, cellId: newCellId });
@@ -176,7 +222,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
   },
 
   "update_cell": async (args) => {
-    const { path, index, cell_id, source, force = false, execute, timeout, max_images, include_images, show_diff = false, client_name } = args as {
+    const { path, index, cell_id, source, force = false, execute, timeout, max_images, include_images, show_diff = false, handoff_after_ms, client_name } = args as {
       path: string;
       index?: number;
       cell_id?: string;
@@ -187,6 +233,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       max_images?: number;
       include_images?: boolean;
       show_diff?: boolean;
+      handoff_after_ms?: number;
       client_name?: string;
     };
     const clientId = client_name || "claude-code";
@@ -305,6 +352,50 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         );
       }
       const timeoutMs = Math.min(Math.max(timeout || 30000, 1000), 300000);
+
+      if (handoff_after_ms !== undefined) {
+        const outcome = await executeCodeWithHandoff(session.kernelId, source, {
+          timeoutMs,
+          handoffAfterMs: handoff_after_ms,
+        });
+        if (outcome.kind === "handoff") {
+          const warn = getPeerWarning(provider);
+          let prefix = `✓ Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
+          if (show_diff) {
+            const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
+            prefix += `\n\n${truncateDiff(diff)}`;
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `${prefix}\n` +
+                  formatHandoffMessage(outcome.runId, handoff_after_ms, outcome.partial.text) +
+                  (warn ?? ""),
+              },
+            ],
+          };
+        }
+        const result = outcome.result;
+        if (cell instanceof Y.Map) {
+          updateCellOutputs(cell, result);
+        }
+        const fullCellIdStr = getCellId(cell);
+        let prefix = `Updated and executed cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
+        if (show_diff) {
+          const diff = generateUnifiedDiff(oldSource, source, `${path}:cell[${resolvedIndex}]`);
+          prefix += `\n\n${truncateDiff(diff)}`;
+        }
+        prefix += "\n\nOutput:\n";
+        const executionId = cacheExecution(path, { text: result.text, images: result.images, cellIndex: resolvedIndex, cellId: fullCellIdStr });
+        const content = buildExecutionContent(result, prefix, { max_images, include_images });
+        content[0].text += `\n(execution_id: ${executionId} — use filter_output to refine)`;
+        const warn = getPeerWarning(provider);
+        if (warn) content[0].text += warn;
+        return { content };
+      }
+
       const result = await executeCode(session.kernelId, source, timeoutMs);
       if (cell instanceof Y.Map) {
         updateCellOutputs(cell, result);

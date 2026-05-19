@@ -277,6 +277,11 @@ export const toolSchemas = [
         timeout: { type: "number", description: "Execution timeout ms. Default: 30000" },
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
+        handoff_after_ms: {
+          type: "number",
+          description:
+            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output. Only used when execute=true.",
+        },
         client_name: { type: "string", description: "Agent name for attribution. Default: 'claude-code'" },
       },
       required: ["path", "source"],
@@ -298,6 +303,11 @@ export const toolSchemas = [
         max_images: { type: "number", description: "Max images to return" },
         include_images: { type: "boolean", description: "Return images. Default: true" },
         show_diff: { type: "boolean", description: "Include source diff. Default: false" },
+        handoff_after_ms: {
+          type: "number",
+          description:
+            "If execution exceeds this many ms, return a run_id handle (with partial output) instead of waiting. Final result arrives via a push notification; fetch it with get_cell_run_output. Only used when execute=true.",
+        },
         client_name: { type: "string", description: "Agent name for attribution. Default: 'claude-code'" },
       },
       required: ["path", "source"],
