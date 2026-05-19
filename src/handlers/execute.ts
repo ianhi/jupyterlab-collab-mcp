@@ -16,6 +16,7 @@ import {
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
 import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, executeCodeWithHandoff, findRun, cacheExecution, getCachedExecution } from "../connection.js";
+import { registerHandoffTarget } from "../handoff-targets.js";
 import type { ExecutionResult } from "../helpers.js";
 
 function formatHandoffMessage(
@@ -109,6 +110,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
             if (outcome.kind === "handoff") {
               // Stop range execution at the first handoff — the agent should
               // get back the run_id and decide what to do next.
+              const cellFullId = getCellId(cell);
+              if (cellFullId) {
+                registerHandoffTarget(outcome.runId, path, cellFullId);
+              }
               results.push({
                 index: i,
                 cellId: cid,
@@ -196,6 +201,9 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         handoffAfterMs: handoff_after_ms,
       });
       if (outcome.kind === "handoff") {
+        if (cellIdStr) {
+          registerHandoffTarget(outcome.runId, path, cellIdStr);
+        }
         return {
           content: [
             {

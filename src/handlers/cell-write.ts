@@ -32,6 +32,7 @@ import {
 } from "../connection.js";
 import { recordChange } from "../cell-tracker.js";
 import { checkLock } from "../cell-locks.js";
+import { registerHandoffTarget } from "../handoff-targets.js";
 
 function formatHandoffMessage(
   runId: string,
@@ -179,6 +180,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           handoffAfterMs: handoff_after_ms,
         });
         if (outcome.kind === "handoff") {
+          registerHandoffTarget(outcome.runId, path, newCellId);
           const warn = getPeerWarning(provider);
           return {
             content: [
@@ -359,6 +361,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           handoffAfterMs: handoff_after_ms,
         });
         if (outcome.kind === "handoff") {
+          const fullCellId = getCellId(cell);
+          if (fullCellId) {
+            registerHandoffTarget(outcome.runId, path, fullCellId);
+          }
           const warn = getPeerWarning(provider);
           let prefix = `✓ Updated cell ${resolvedIndex}${cellIdStr ? ` (${cellIdStr})` : ""} in ${path}`;
           if (show_diff) {

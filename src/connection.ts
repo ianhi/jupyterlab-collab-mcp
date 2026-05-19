@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import { type ExecutionResult } from "./helpers.js";
 import { KernelClient } from "./kernel-client.js";
 import { notifyHandoffComplete } from "./notifications.js";
+import { backfillRunOutputs } from "./handoff-targets.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -398,6 +399,14 @@ export function getKernelClient(kernelId: string): KernelClient {
   // produce no notification.
   client.onRunSettled((run) => {
     if (!run.wasHandedOff) return;
+    // Backfill the originating notebook cell's outputs (if we registered
+    // a target for this run). Silent no-op when the notebook was
+    // disconnected or the cell was deleted.
+    try {
+      backfillRunOutputs(run);
+    } catch {
+      // Don't let a y-doc mutation error block the notification.
+    }
     notifyHandoffComplete({
       run_id: run.id,
       kernel_id: run.kernelId,
