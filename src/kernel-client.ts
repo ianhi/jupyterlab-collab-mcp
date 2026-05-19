@@ -1,16 +1,23 @@
 /**
  * KernelClient: a long-lived multiplexed WebSocket to a single Jupyter kernel.
  *
- * Phase 1 scope: one persistent `/api/kernels/{id}/channels` socket per
- * kernelId. Concurrent `run()` calls are multiplexed by `msg_id`: each run
- * has its own header msg_id and only consumes messages whose
- * `parent_header.msg_id` matches. The kernel still executes serially, but
- * callers don't need to coordinate — they just `await client.run(code, ms)`.
+ * Phase 2 scope: in addition to multiplexing concurrent runs by `msg_id`,
+ * each run is tracked as a `Run` state machine: `queued -> running ->
+ * completed | failed`, with an extra `handed_off` terminal-for-the-caller
+ * state for slow runs.
  *
- * Timeouts reject the specific run only; the kernel keeps running the cell
- * (that orphan path is the seam Phase 2 turns into the handoff mechanism).
- * WebSocket close/error rejects every in-flight run because the kernel is
- * gone or unreachable.
+ * `run(code, opts)` supports two modes:
+ *  - `timeoutMs` only (legacy): hard deadline; rejects on exceed.
+ *  - `handoffAfterMs` provided: if the run hasn't terminated after
+ *    `handoffAfterMs`, resolves with `kind: "handoff"` carrying the
+ *    accumulated partial output and the `run_id`. The Run keeps living
+ *    inside the client and will transition to `completed`/`failed` when
+ *    the kernel finally responds. Subscribers can register via
+ *    `onRunSettled` to be notified.
+ *
+ * Retention: at most 100 finished runs kept (LRU), and completed runs
+ * older than 30 minutes are evicted. In-flight (queued/running/handed_off)
+ * runs are never evicted.
  */
 import WebSocketImpl from "ws";
 import crypto from "node:crypto";
@@ -39,17 +46,62 @@ export type WebSocketFactory = (url: string) => KernelWebSocket;
 const defaultFactory: WebSocketFactory = (url) =>
   new WebSocketImpl(url) as unknown as KernelWebSocket;
 
-interface InFlightRun {
-  msgId: string;
+export type RunState =
+  | "queued"
+  | "running"
+  | "completed"
+  | "handed_off"
+  | "failed";
+
+/**
+ * A single execute_request lifecycle. Mutable while in-flight; callers
+ * should treat it as a snapshot when reading.
+ */
+export interface Run {
+  id: string; // == msgId; exposed externally as run_id
+  kernelId: string;
+  state: RunState;
+  startedAt: number;
+  completedAt?: number;
   outputs: NotebookOutput[];
-  textParts: string[];
+  executionCount: number | null;
+  status: "ok" | "error";
+  text: string;
   images: { data: string; mimeType: string }[];
-  htmlParts: string[];
+  html: string[];
+  /** Final error message if state === "failed". */
+  errorMessage?: string;
+}
+
+/** Partial result returned when a run is handed off mid-execution. */
+export interface PartialResult {
   status: "ok" | "error";
   executionCount: number | null;
-  resolve: (r: ExecutionResult) => void;
-  reject: (e: Error) => void;
-  timeoutId: ReturnType<typeof setTimeout> | null;
+  outputs: NotebookOutput[];
+  text: string;
+  images: { data: string; mimeType: string }[];
+  html: string[];
+}
+
+export type RunOutcome =
+  | { kind: "result"; runId: string; result: ExecutionResult }
+  | { kind: "handoff"; runId: string; partial: PartialResult };
+
+/**
+ * Internal in-flight record. Wraps the user-facing `Run` snapshot plus
+ * the pending Promise machinery.
+ */
+interface InFlightRun {
+  run: Run;
+  /** Resolver used by `run()`. Set to `null` after first resolution. */
+  outcomeResolve: ((o: RunOutcome) => void) | null;
+  outcomeReject: ((e: Error) => void) | null;
+  /** Whether this run was handed off (i.e. resolved with kind: "handoff"). */
+  wasHandedOff: boolean;
+  hardTimer: ReturnType<typeof setTimeout> | null;
+  handoffTimer: ReturnType<typeof setTimeout> | null;
+  /** True if caller passed `handoffAfterMs`. */
+  handoffEnabled: boolean;
 }
 
 type WSState = "idle" | "connecting" | "open" | "closed";
@@ -67,7 +119,16 @@ export interface KernelClientOptions {
   openTimeoutMs?: number;
 }
 
+export interface RunOptions {
+  /** Hard timeout: reject the run if it doesn't finish in this time. */
+  timeoutMs?: number;
+  /** If set, resolve with `kind: "handoff"` after this many ms instead of rejecting. */
+  handoffAfterMs?: number;
+}
+
 const DEFAULT_OPEN_TIMEOUT_MS = 10_000;
+const MAX_RETAINED_RUNS = 100;
+const COMPLETED_RUN_TTL_MS = 30 * 60 * 1000;
 
 export class KernelClient {
   private readonly _kernelId: string;
@@ -85,6 +146,10 @@ export class KernelClient {
   private openTimer: ReturnType<typeof setTimeout> | null = null;
 
   private readonly inFlight = new Map<string, InFlightRun>();
+  /** Insertion-ordered map of all known runs (LRU eviction from the front). */
+  private readonly runs = new Map<string, Run>();
+  private readonly settledListeners = new Set<(run: Run) => void>();
+
   private _lastActivityAt = Date.now();
   private closeNotified = false;
 
@@ -112,39 +177,145 @@ export class KernelClient {
     return this.state === "open" && this.ws !== null;
   }
 
-  run(code: string, timeoutMs: number): Promise<ExecutionResult> {
+  /**
+   * Submit `code` for execution. Returns a `RunOutcome` describing whether
+   * the run completed inline or was handed off.
+   *
+   * Overloads:
+   *   - `run(code, timeoutMs)` — legacy numeric form, same semantics as Phase 1.
+   *   - `run(code, opts)` — Phase 2 form with optional `handoffAfterMs`.
+   */
+  run(code: string, opts: RunOptions): Promise<RunOutcome>;
+  // Legacy numeric form retained for older callers.
+  run(code: string, timeoutMs: number): Promise<RunOutcome>;
+  run(
+    code: string,
+    optsOrTimeout: RunOptions | number
+  ): Promise<RunOutcome> {
+    const opts: RunOptions =
+      typeof optsOrTimeout === "number"
+        ? { timeoutMs: optsOrTimeout }
+        : optsOrTimeout;
     // Kick off WS open synchronously so the pool sees a connecting client
     // even before the caller awaits — tests and idle eviction both rely on
     // `factoryCalls`/state being observable on the same tick.
     const opening = this.ensureOpen();
-    return opening.then(() => this.sendRequest(code, timeoutMs));
+    return opening.then(() => this.sendRequest(code, opts));
   }
 
-  private sendRequest(code: string, timeoutMs: number): Promise<ExecutionResult> {
-    return new Promise<ExecutionResult>((resolve, reject) => {
+  getRun(runId: string): Run | undefined {
+    return this.runs.get(runId);
+  }
+
+  /** Most-recent-first list of recent runs. */
+  recentRuns(): Run[] {
+    return [...this.runs.values()].reverse();
+  }
+
+  /**
+   * Register a callback fired whenever a run reaches a terminal kernel state
+   * (completed/failed). Note: handed-off runs fire when they later complete,
+   * not at the handoff moment.
+   */
+  onRunSettled(cb: (run: Run) => void): () => void {
+    this.settledListeners.add(cb);
+    return () => {
+      this.settledListeners.delete(cb);
+    };
+  }
+
+  private sendRequest(code: string, opts: RunOptions): Promise<RunOutcome> {
+    return new Promise<RunOutcome>((resolve, reject) => {
       const msgId = crypto.randomUUID();
-      const run: InFlightRun = {
-        msgId,
+      const run: Run = {
+        id: msgId,
+        kernelId: this._kernelId,
+        state: "queued",
+        startedAt: Date.now(),
         outputs: [],
-        textParts: [],
+        textParts: undefined as never, // placeholder, see textParts on inFlight
+        text: "",
         images: [],
-        htmlParts: [],
+        html: [],
         status: "ok",
         executionCount: null,
-        resolve,
-        reject,
-        timeoutId: null,
-      };
-      this.inFlight.set(msgId, run);
+      } as Run;
+      // `textParts` is internal accumulation; store it on the run record so
+      // we can recompute `text` lazily, but expose only `text`.
+      (run as any)._textParts = [] as string[];
 
-      const timeoutSecs = Math.max(1, Math.round(timeoutMs / 1000));
-      run.timeoutId = setTimeout(() => {
-        // Reject only this run; the WS stays open and the kernel keeps
-        // executing this cell. Phase 2 will turn the orphan into a handoff.
-        if (this.inFlight.delete(msgId)) {
-          run.reject(new Error(`Execution timeout after ${timeoutSecs} seconds`));
+      const inflight: InFlightRun = {
+        run,
+        outcomeResolve: resolve,
+        outcomeReject: reject,
+        wasHandedOff: false,
+        hardTimer: null,
+        handoffTimer: null,
+        handoffEnabled: opts.handoffAfterMs !== undefined,
+      };
+      this.inFlight.set(msgId, inflight);
+      this.recordRun(run);
+
+      const hardTimeoutMs = opts.timeoutMs;
+      if (
+        hardTimeoutMs !== undefined &&
+        opts.handoffAfterMs === undefined
+      ) {
+        // Legacy: hard reject after timeoutMs.
+        const secs = Math.max(1, Math.round(hardTimeoutMs / 1000));
+        inflight.hardTimer = setTimeout(() => {
+          if (this.inFlight.delete(msgId)) {
+            run.state = "failed";
+            run.completedAt = Date.now();
+            run.errorMessage = `Execution timeout after ${secs} seconds`;
+            this.fireSettled(run);
+            inflight.outcomeReject?.(new Error(run.errorMessage));
+            inflight.outcomeReject = null;
+            inflight.outcomeResolve = null;
+          }
+        }, hardTimeoutMs);
+      }
+
+      if (opts.handoffAfterMs !== undefined) {
+        inflight.handoffTimer = setTimeout(() => {
+          // Hand off — but keep the in-flight entry alive.
+          if (!inflight.outcomeResolve) return;
+          inflight.wasHandedOff = true;
+          run.state = "handed_off";
+          const partial: PartialResult = {
+            status: run.status,
+            executionCount: run.executionCount,
+            outputs: [...run.outputs],
+            text: run.text,
+            images: [...run.images],
+            html: [...run.html],
+          };
+          inflight.outcomeResolve({ kind: "handoff", runId: msgId, partial });
+          inflight.outcomeResolve = null;
+          inflight.outcomeReject = null;
+        }, opts.handoffAfterMs);
+
+        // If timeoutMs is also provided alongside handoffAfterMs, treat it
+        // as a hard upper bound that fails the still-running run.
+        if (
+          hardTimeoutMs !== undefined &&
+          hardTimeoutMs > opts.handoffAfterMs
+        ) {
+          inflight.hardTimer = setTimeout(() => {
+            if (this.inFlight.delete(msgId)) {
+              run.state = "failed";
+              run.completedAt = Date.now();
+              run.errorMessage = `Execution hard timeout after ${hardTimeoutMs}ms`;
+              this.fireSettled(run);
+              if (inflight.outcomeReject) {
+                inflight.outcomeReject(new Error(run.errorMessage));
+                inflight.outcomeReject = null;
+                inflight.outcomeResolve = null;
+              }
+            }
+          }, hardTimeoutMs);
         }
-      }, timeoutMs);
+      }
 
       const msg = {
         header: {
@@ -171,11 +342,20 @@ export class KernelClient {
 
       try {
         this.ws!.send(JSON.stringify(msg));
+        run.state = "running";
         this._lastActivityAt = Date.now();
       } catch (err) {
         if (this.inFlight.delete(msgId)) {
-          if (run.timeoutId) clearTimeout(run.timeoutId);
-          run.reject(err instanceof Error ? err : new Error(String(err)));
+          this.clearTimers(inflight);
+          run.state = "failed";
+          run.completedAt = Date.now();
+          run.errorMessage = err instanceof Error ? err.message : String(err);
+          this.fireSettled(run);
+          inflight.outcomeReject?.(
+            err instanceof Error ? err : new Error(String(err))
+          );
+          inflight.outcomeReject = null;
+          inflight.outcomeResolve = null;
         }
       }
     });
@@ -253,9 +433,9 @@ export class KernelClient {
       }
       const parentMsgId = msg?.parent_header?.msg_id;
       if (!parentMsgId) return;
-      const run = this.inFlight.get(parentMsgId);
-      if (!run) return; // not ours (or already timed out / completed)
-      this.ingest(run, msg);
+      const inflight = this.inFlight.get(parentMsgId);
+      if (!inflight) return; // not ours (or already timed out / completed)
+      this.ingest(inflight, msg);
     });
 
     ws.on("error", (err: Error) => {
@@ -277,7 +457,9 @@ export class KernelClient {
     });
   }
 
-  private ingest(run: InFlightRun, msg: any): void {
+  private ingest(inflight: InFlightRun, msg: any): void {
+    const run = inflight.run;
+    const textParts: string[] = (run as any)._textParts;
     switch (msg.msg_type) {
       case "stream":
         run.outputs.push({
@@ -285,7 +467,8 @@ export class KernelClient {
           name: msg.content.name,
           text: msg.content.text,
         });
-        run.textParts.push(stripAnsi(msg.content.text || ""));
+        textParts.push(stripAnsi(msg.content.text || ""));
+        run.text = textParts.join("");
         break;
 
       case "execute_result":
@@ -295,7 +478,8 @@ export class KernelClient {
           data: msg.content.data,
           metadata: msg.content.metadata || {},
         });
-        run.textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
+        textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
+        run.text = textParts.join("");
         if (msg.content.data?.["image/png"]) {
           run.images.push({
             data: msg.content.data["image/png"],
@@ -309,7 +493,7 @@ export class KernelClient {
           });
         }
         if (msg.content.data?.["text/html"]) {
-          run.htmlParts.push(msg.content.data["text/html"]);
+          run.html.push(msg.content.data["text/html"]);
         }
         break;
 
@@ -319,7 +503,8 @@ export class KernelClient {
           data: msg.content.data,
           metadata: msg.content.metadata || {},
         });
-        run.textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
+        textParts.push(stripAnsi(msg.content.data?.["text/plain"] || ""));
+        run.text = textParts.join("");
         if (msg.content.data?.["image/png"]) {
           run.images.push({
             data: msg.content.data["image/png"],
@@ -333,7 +518,7 @@ export class KernelClient {
           });
         }
         if (msg.content.data?.["text/html"]) {
-          run.htmlParts.push(msg.content.data["text/html"]);
+          run.html.push(msg.content.data["text/html"]);
         }
         break;
 
@@ -345,23 +530,37 @@ export class KernelClient {
           evalue: msg.content.evalue,
           traceback: msg.content.traceback,
         });
-        run.textParts.push(
+        textParts.push(
           stripAnsi(`${msg.content.ename}: ${msg.content.evalue}`)
         );
+        run.text = textParts.join("");
         break;
 
       case "execute_reply": {
         run.executionCount = msg.content.execution_count ?? run.executionCount;
-        if (run.timeoutId) clearTimeout(run.timeoutId);
-        this.inFlight.delete(run.msgId);
-        run.resolve({
+        this.clearTimers(inflight);
+        this.inFlight.delete(run.id);
+        run.state = "completed";
+        run.completedAt = Date.now();
+
+        const result: ExecutionResult = {
           status: run.status,
           executionCount: run.executionCount,
           outputs: run.outputs,
-          text: run.textParts.join(""),
+          text: run.text,
           images: run.images,
-          html: run.htmlParts,
-        });
+          html: run.html,
+        };
+
+        // If we already handed off, only fire settled listeners — caller
+        // already got their handoff outcome.
+        if (inflight.outcomeResolve) {
+          inflight.outcomeResolve({ kind: "result", runId: run.id, result });
+          inflight.outcomeResolve = null;
+          inflight.outcomeReject = null;
+        }
+        this.fireSettled(run);
+        this.sweepRetention();
         break;
       }
     }
@@ -382,11 +581,21 @@ export class KernelClient {
 
   private failAllInFlight(reason: string): void {
     if (this.inFlight.size === 0) return;
-    const runs = [...this.inFlight.values()];
+    const entries = [...this.inFlight.values()];
     this.inFlight.clear();
-    for (const run of runs) {
-      if (run.timeoutId) clearTimeout(run.timeoutId);
-      run.reject(new Error(`kernel ${this._kernelId}: ${reason}`));
+    for (const inflight of entries) {
+      this.clearTimers(inflight);
+      const run = inflight.run;
+      run.state = "failed";
+      run.completedAt = Date.now();
+      run.errorMessage = `kernel ${this._kernelId}: ${reason}`;
+      const err = new Error(run.errorMessage);
+      if (inflight.outcomeReject) {
+        inflight.outcomeReject(err);
+        inflight.outcomeReject = null;
+        inflight.outcomeResolve = null;
+      }
+      this.fireSettled(run);
     }
   }
 
@@ -407,5 +616,68 @@ export class KernelClient {
         // Pool callbacks must not poison the client.
       }
     }
+  }
+
+  private clearTimers(inflight: InFlightRun): void {
+    if (inflight.hardTimer) {
+      clearTimeout(inflight.hardTimer);
+      inflight.hardTimer = null;
+    }
+    if (inflight.handoffTimer) {
+      clearTimeout(inflight.handoffTimer);
+      inflight.handoffTimer = null;
+    }
+  }
+
+  private fireSettled(run: Run): void {
+    for (const cb of this.settledListeners) {
+      try {
+        cb(run);
+      } catch {
+        // Listener errors must not poison the client.
+      }
+    }
+  }
+
+  private recordRun(run: Run): void {
+    this.runs.set(run.id, run);
+    this.sweepRetention();
+  }
+
+  /**
+   * Enforce retention policy:
+   *  - In-flight runs (queued/running/handed_off) are never evicted.
+   *  - Completed/failed runs older than COMPLETED_RUN_TTL_MS are evicted.
+   *  - LRU cap of MAX_RETAINED_RUNS (only counts terminal-for-history runs).
+   */
+  private sweepRetention(): void {
+    const now = Date.now();
+    // First, TTL eviction.
+    for (const [id, run] of this.runs) {
+      if (this.isTerminalForHistory(run)) {
+        if (
+          run.completedAt !== undefined &&
+          now - run.completedAt > COMPLETED_RUN_TTL_MS
+        ) {
+          this.runs.delete(id);
+        }
+      }
+    }
+    // Then, LRU cap: drop oldest terminal-for-history entries.
+    while (this.runs.size > MAX_RETAINED_RUNS) {
+      let evicted = false;
+      for (const [id, run] of this.runs) {
+        if (this.isTerminalForHistory(run)) {
+          this.runs.delete(id);
+          evicted = true;
+          break;
+        }
+      }
+      if (!evicted) break; // only in-flight runs left; can't evict
+    }
+  }
+
+  private isTerminalForHistory(run: Run): boolean {
+    return run.state === "completed" || run.state === "failed";
   }
 }

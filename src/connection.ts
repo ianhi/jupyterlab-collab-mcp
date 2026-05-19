@@ -421,7 +421,12 @@ export async function executeCode(
   code: string,
   timeoutMs: number = 30000
 ): Promise<ExecutionResult> {
-  return getKernelClient(kernelId).run(code, timeoutMs);
+  const outcome = await getKernelClient(kernelId).run(code, { timeoutMs });
+  if (outcome.kind === "result") return outcome.result;
+  // No handoffAfterMs was passed, so this branch is unreachable in practice.
+  throw new Error(
+    `Unexpected handoff outcome for legacy executeCode (run_id=${outcome.runId})`
+  );
 }
 
 // ============================================================================
