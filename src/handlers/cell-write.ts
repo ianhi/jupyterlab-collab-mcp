@@ -999,7 +999,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       client_name?: string;
     };
     const clientId = client_name || "claude-code";
-    const operation = delete_source ? "move" : "copy";
     const operationPast = delete_source ? "Moved" : "Copied";
 
     if (!isJupyterConnected()) {

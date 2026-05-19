@@ -59,7 +59,6 @@ export function filterOutputText(
   if (options.output_tail !== undefined && options.output_tail > 0) {
     const n = options.output_tail;
     if (filtered.length > n) {
-      const omitted = filtered.length - n;
       const result = filtered.slice(-n);
       const note = grepNote
         ? `${grepNote}, showing last ${n}`
