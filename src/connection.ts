@@ -208,6 +208,9 @@ export async function apiFetch(
   url.searchParams.set("token", config.token);
 
   const headers = new Headers(options.headers);
+  if (!headers.has("Authorization")) {
+    headers.set("Authorization", `token ${config.token}`);
+  }
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
