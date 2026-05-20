@@ -196,6 +196,40 @@ export function getDocForPath(path: string): Y.Doc | undefined {
 // Jupyter API helpers
 // ============================================================================
 
+// XSRF state: Jupyter Server protects POST/PUT/DELETE/PATCH with an _xsrf cookie
+// that must be echoed back as an X-XSRFToken header. We do one GET on first use
+// to receive the cookie, then attach it to every subsequent state-changing call.
+let xsrfCookie: string | null = null;
+let xsrfToken: string | null = null;
+
+function resetXsrf() {
+  xsrfCookie = null;
+  xsrfToken = null;
+}
+
+async function ensureXsrf(): Promise<void> {
+  if (xsrfToken && xsrfCookie) return;
+  const config = getConfig();
+  // The lab root sets the _xsrf cookie; /api/me does not.
+  const url = new URL(`${config.baseUrl}/`);
+  url.searchParams.set("token", config.token);
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `token ${config.token}` },
+  });
+  const setCookie =
+    typeof (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie === "function"
+      ? (res.headers as Headers & { getSetCookie: () => string[] }).getSetCookie()
+      : [res.headers.get("set-cookie") ?? ""];
+  for (const sc of setCookie) {
+    const m = sc.match(/_xsrf=([^;]+)/);
+    if (m) {
+      xsrfToken = m[1];
+      xsrfCookie = `_xsrf=${m[1]}`;
+      return;
+    }
+  }
+}
+
 export async function apiFetch(
   endpoint: string,
   options: RequestInit = {}
@@ -207,6 +241,13 @@ export async function apiFetch(
   const url = new URL(`${config.baseUrl}${normalized}`);
   url.searchParams.set("token", config.token);
 
+  const method = (options.method ?? "GET").toUpperCase();
+  const isStateChanging = method !== "GET" && method !== "HEAD";
+
+  if (isStateChanging) {
+    await ensureXsrf();
+  }
+
   const headers = new Headers(options.headers);
   if (!headers.has("Authorization")) {
     headers.set("Authorization", `token ${config.token}`);
@@ -214,8 +255,18 @@ export async function apiFetch(
   if (options.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  if (isStateChanging && xsrfCookie && xsrfToken) {
+    if (!headers.has("Cookie")) headers.set("Cookie", xsrfCookie);
+    if (!headers.has("X-XSRFToken")) headers.set("X-XSRFToken", xsrfToken);
+  }
 
-  return fetch(url.toString(), { ...options, headers });
+  const response = await fetch(url.toString(), { ...options, headers });
+  // If XSRF was rejected (e.g. cookie expired), drop our cached pair so the
+  // next attempt re-fetches it. Caller still sees the 403.
+  if (response.status === 403 && isStateChanging) {
+    resetXsrf();
+  }
+  return response;
 }
 
 export interface NotebookSession {
