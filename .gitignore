@@ -56,3 +56,6 @@ coverage/
 
 # Local test subproject
 lorenz-collab/
+
+# Coiled sandbox
+coiled-test/

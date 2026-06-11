@@ -23,7 +23,6 @@ import types
 from itertools import islice
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Timeout guard — prevents any single inspection from hanging
 # ---------------------------------------------------------------------------
@@ -31,12 +30,14 @@ from typing import Any
 _INSPECT_TIMEOUT_SECS = 2
 
 
-class _InspectTimeout(Exception):
+class _InspectTimeoutError(Exception):
     pass
 
 
-def _with_timeout(fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, **kwargs: Any) -> Any:
-    """Run fn with a timeout. Returns result or raises _InspectTimeout.
+def _with_timeout(
+    fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, **kwargs: Any
+) -> Any:
+    """Run fn with a timeout. Returns result or raises _InspectTimeoutError.
 
     Uses signal.SIGALRM on Unix (main thread only, zero overhead).
     Falls back to threading on Windows or non-main threads.
@@ -47,7 +48,7 @@ def _with_timeout(fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, *
             old_handler = signal.getsignal(signal.SIGALRM)
 
             def _alarm_handler(signum: int, frame: Any) -> None:
-                raise _InspectTimeout()
+                raise _InspectTimeoutError()
 
             signal.signal(signal.SIGALRM, _alarm_handler)
             signal.alarm(int(timeout) or 1)
@@ -74,7 +75,7 @@ def _with_timeout(fn: Any, *args: Any, timeout: float = _INSPECT_TIMEOUT_SECS, *
     t.start()
     t.join(timeout)
     if t.is_alive():
-        raise _InspectTimeout()
+        raise _InspectTimeoutError()
     if error_box:
         raise error_box[0]
     return result_box[0]
@@ -429,15 +430,15 @@ def _inspect_xarray_datatree(
         if sizes is not None:
             result["dims"] = dict(islice(sizes.items(), max_items))
     # Count subtree nodes with a cap to avoid slow iteration on remote-backed trees
-    _MAX_SUBTREE_COUNT = 500
+    max_subtree_count = 500
     with contextlib.suppress(Exception):
         count = 0
         for _ in obj.subtree:
             count += 1
-            if count >= _MAX_SUBTREE_COUNT:
+            if count >= max_subtree_count:
                 break
-        if count >= _MAX_SUBTREE_COUNT:
-            result["total_nodes"] = f"{_MAX_SUBTREE_COUNT}+"
+        if count >= max_subtree_count:
+            result["total_nodes"] = f"{max_subtree_count}+"
         else:
             result["total_nodes"] = count
     # Flag remote-backed
@@ -735,7 +736,7 @@ def list_user_variables(
                 results_schema.append(
                     _with_timeout(summarize_one, vname, obj, max_items, max_name_length)
                 )
-            except (_InspectTimeout, Exception):
+            except (_InspectTimeoutError, Exception):
                 results_schema.append(f"{vname}: {_type_name(obj)} (inspection timed out)")
         return results_schema
 
@@ -746,10 +747,14 @@ def list_user_variables(
                 results_full.append(
                     _with_timeout(inspect_one, vname, obj, max_items, max_name_length)
                 )
-            except _InspectTimeout:
-                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection timed out"})
+            except _InspectTimeoutError:
+                results_full.append(
+                    {"name": vname, "type": _type_name(obj), "error": "inspection timed out"}
+                )
             except Exception:
-                results_full.append({"name": vname, "type": _type_name(obj), "error": "inspection failed"})
+                results_full.append(
+                    {"name": vname, "type": _type_name(obj), "error": "inspection failed"}
+                )
         return results_full
 
     # basic — current behavior

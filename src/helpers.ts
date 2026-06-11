@@ -59,7 +59,6 @@ export function filterOutputText(
   if (options.output_tail !== undefined && options.output_tail > 0) {
     const n = options.output_tail;
     if (filtered.length > n) {
-      const omitted = filtered.length - n;
       const result = filtered.slice(-n);
       const note = grepNote
         ? `${grepNote}, showing last ${n}`
@@ -199,16 +198,31 @@ export function resolveCellIndices(
 /**
  * Parse a JupyterLab URL to extract host, port, and token
  */
-export function parseJupyterUrl(url: string): { host: string; port: number; token: string } {
+export function parseJupyterUrl(url: string): {
+  host: string;
+  port: number;
+  token: string;
+  protocol: "http:" | "https:";
+  basePath: string;
+} {
   const parsed = new URL(url);
   const token = parsed.searchParams.get("token");
   if (!token) {
     throw new Error("URL must include a token parameter (e.g., ?token=xxx)");
   }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+  }
+  // Strip the trailing JupyterLab UI path (e.g. /lab, /tree, /doc/...) so basePath
+  // is the server prefix (e.g. "" for localhost, "/jupyter" for proxied setups).
+  const pathname = parsed.pathname.replace(/\/$/, "");
+  const basePath = pathname.replace(/\/(lab|tree|doc|notebooks|terminals|files|retro)(\/.*)?$/, "");
   return {
     host: parsed.hostname,
     port: parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === "https:" ? 443 : 80),
     token,
+    protocol: parsed.protocol,
+    basePath,
   };
 }
 
@@ -589,6 +603,30 @@ export function checkHumanFocus(
   }
 
   return { blocked: false };
+}
+
+/**
+ * Returns a warning string when no other y-doc peers are present on the
+ * notebook room (i.e. only Claude's own awareness entry). The user's
+ * browser tab may not be connected, so edits won't be visible in real time.
+ * Returns null when at least one other peer is present, or when no awareness
+ * is available.
+ */
+export function getPeerWarning(provider: any): string | null {
+  const awareness = provider?.awareness;
+  if (!awareness) return null;
+  const states = awareness.getStates();
+  const myClientId = awareness.clientID;
+  let others = 0;
+  for (const clientId of states.keys()) {
+    if (clientId !== myClientId) others++;
+  }
+  if (others > 0) return null;
+  return (
+    "\n\n⚠ No browser peers connected to this notebook room — the edit reached the " +
+    "server but the user's tab may not be showing it. Ask them to refresh / reopen " +
+    "the notebook, then re-check before continuing."
+  );
 }
 
 /**
