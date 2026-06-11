@@ -1,6 +1,6 @@
 {
   "name": "jupyterlab-collab-mcp",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "MCP server for real-time JupyterLab notebook collaboration",
   "license": "BSD-3-Clause",
   "repository": {
@@ -26,7 +26,11 @@
   "files": [
     "dist",
     "src",
-    "python/src/variable_inspector/inspector.py"
+    "python/src/variable_inspector/inspector.py",
+    "!**/*.test.ts",
+    "!**/*.test.js",
+    "!**/*.test.d.ts",
+    "!src/test.ts"
   ],
   "scripts": {
     "build": "tsc",
