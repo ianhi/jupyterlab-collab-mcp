@@ -59,3 +59,8 @@ lorenz-collab/
 
 # Coiled sandbox
 coiled-test/
+
+# Local agent scratch / sandbox
+.claude/settings.local.json
+AGENT_NOTES.md
+test-notebooks/

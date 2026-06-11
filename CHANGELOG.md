@@ -4,6 +4,17 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-11
+
+### Added
+- **Long-lived kernel client** — persistent WebSocket per kernel (`KernelClient` pool) replaces per-call connections, cutting latency on repeated execution
+- **Execution handoff** — `handoff_after_ms` on `execute_cell`/`execute_code`/`insert_cell`/`update_cell` returns a `run_id` when a cell runs past the threshold; retrieve results later with the new `get_cell_run_output` tool, with a channel notification pushed when a handed-off run terminates
+- **Proxied JupyterLab support** — `connect_jupyter` handles `https`→`wss` and path-prefixed deployments (Coiled, JupyterHub), with cookie-jar + `X-XSRFToken` auth for state-changing requests and a `token` sent via `Authorization` header
+- Warning when no browser peers are present to see our edits
+- `filter_output` tool — post-process cached execution results with grep, head, tail, max_lines
+- `show_diff` parameter on `update_cell` for inline diff display
+- Execution result caching for `filter_output` access to full unfiltered output
+
 ### Changed
 - **Consolidated 55 tools down to 39** — reduced schema token overhead by merging related tools:
   - `insert_and_execute`/`update_and_execute` → `insert_cell(execute=true)`/`update_cell(execute=true)`
@@ -20,11 +31,6 @@ All notable changes to the jupyterlab-collab-mcp.
   - `get_kernel_variables`/`inspect_variable` → `kernel_variables` (provide `names` to inspect)
 - Removed `insertCell` parameter from `execute_code` — use `insert_cell(execute=true)` instead
 - Removed `max_output_lines`, `output_tail`, `output_grep` from execute tools — use `filter_output` instead
-
-### Added
-- `filter_output` tool — post-process cached execution results with grep, head, tail, max_lines
-- `show_diff` parameter on `update_cell` for inline diff display
-- Execution result caching for `filter_output` access to full unfiltered output
 
 ### Fixed
 - Batch delete (`delete_cell` with indices/range) now records change history for `recover_cell`
