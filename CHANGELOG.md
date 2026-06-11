@@ -4,7 +4,7 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
-## [0.9.0] - 2026-06-11
+## [0.10.0] - 2026-06-11
 
 ### Added
 - **Long-lived kernel client** — persistent WebSocket per kernel (`KernelClient` pool) replaces per-call connections, cutting latency on repeated execution
