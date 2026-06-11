@@ -23,6 +23,19 @@ connect_jupyter(url="http://localhost:8888/lab?token=abc123")
 - The token is parsed from the URL automatically
 - Most read/write tools work without connecting (filesystem mode)
 
+### Proxied servers (Coiled, JupyterHub)
+
+`connect_jupyter` works with JupyterLab behind an HTTPS reverse proxy or path prefix — pass the full URL exactly as it appears in your browser:
+
+```
+# Coiled / JupyterHub style: https scheme + path prefix
+connect_jupyter(url="https://cluster-xxxx.dask.host/jupyter/lab?token=abc123")
+```
+
+- `https` URLs automatically use a secure WebSocket (`wss`) for kernel traffic
+- Path prefixes (e.g. `/jupyter`) are preserved across all API and WebSocket requests
+- Auth is handled for proxied setups: the token is sent both in the query string and the `Authorization` header, and an `_xsrf` cookie is fetched and echoed as `X-XSRFToken` on state-changing requests (some proxies strip headers, so both paths are covered)
+
 ---
 
 ## list_files

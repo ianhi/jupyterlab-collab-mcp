@@ -5,7 +5,7 @@ description: How the MCP server minimizes token usage, and how to control output
 
 The MCP server is designed to be **stingy by default** — responses are compact, outputs are truncated, and verbose diffs are omitted. This page documents the full token cost picture and all context-related controls.
 
-## Schema cost: ~6k tokens for 39 tools
+## Schema cost: ~6k tokens for 40 tools
 
 Every MCP tool has a JSON schema (name, description, parameters) that the LLM must see to know what tools are available. Here's the breakdown:
 
@@ -14,16 +14,16 @@ Every MCP tool has a JSON schema (name, description, parameters) that the LLM mu
 | Connection | 7 | ~630 |
 | Reading | 5 | ~950 |
 | Editing | 7 | ~1,550 |
-| Execution | 4 | ~1,030 |
+| Execution | 5 | ~1,280 |
 | Metadata & Tags | 3 | ~560 |
 | Kernel & Analysis | 5 | ~790 |
 | Collaboration | 7 | ~910 |
 | Feedback | 1 | ~100 |
-| **Total** | **39** | **~6,020** |
+| **Total** | **40** | **~6,270** |
 
 This is down from ~12.2k tokens at 55 tools — a **50% reduction** through tool consolidation and description trimming, with no loss of functionality.
 
-For comparison, a typical Claude conversation has a 200k token context window. The full 39-tool schema is ~3% of that.
+For comparison, a typical Claude conversation has a 200k token context window. The full 40-tool schema is ~3% of that.
 
 ### Claude Code lazy-loads MCP tools
 
@@ -31,7 +31,7 @@ Claude Code uses **deferred tool loading** — MCP tool schemas are not injected
 
 - **Zero schema cost** in conversations that don't use notebook tools
 - **Partial cost** when only a few tools are needed (e.g., just `execute_cell` and `get_notebook_content`)
-- **Full ~6k cost** only when the agent loads all 39 tools in a single session
+- **Full ~6k cost** only when the agent loads all 40 tools in a single session
 
 This is why we consolidated from 55 to 39 tools — fewer schemas means less overhead when tools are loaded, and the consolidation preserved all functionality.
 
