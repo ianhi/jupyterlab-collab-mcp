@@ -19,6 +19,7 @@ Execute one or more cells in the notebook's kernel. Supports single-cell, range,
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return (shows last N) |
 | `include_images` | boolean | No | `true` | Include images in response |
+| `handoff_after_ms` | number | No | — | If execution exceeds this many ms, return a `run_id` handle (with partial output) instead of waiting — see [Long-running cells](#long-running-cells-handoff) |
 
 ### Range mode
 
@@ -69,6 +70,7 @@ Execute code in the notebook's kernel without modifying the notebook. Works with
 | `timeout` | number | No | `30000` | Timeout in milliseconds (max 300000) |
 | `max_images` | number | No | all | Maximum images to return |
 | `include_images` | boolean | No | `true` | Include images in response |
+| `handoff_after_ms` | number | No | — | If execution exceeds this many ms, return a `run_id` handle instead of waiting — see [Long-running cells](#long-running-cells-handoff) |
 
 **Examples:**
 ```
@@ -110,6 +112,48 @@ filter_output(path="nb.ipynb", cell_id="a3f8c2d1", max_lines=100)
 **Notes:**
 - Works on the cached output from the most recent execution — does not re-execute
 - Filters can be combined: `grep` filters first, then `head`/`tail`/`max_lines` applies
+
+---
+
+## Long-running cells: handoff
+
+By default an execution call blocks until the cell finishes (or `timeout` is hit). For cells that run longer than you want to wait — training loops, large queries, long simulations — pass `handoff_after_ms` to any execute call (`execute_cell`, `execute_code`, or `insert_cell`/`update_cell` with `execute=true`).
+
+If the cell is still running after that many milliseconds, the call returns immediately with a `run_id` handle and whatever partial output has accumulated, instead of blocking. The kernel keeps running. When the run terminates, a push notification (`<channel source="jupyter">`) fires — call `get_cell_run_output` with the `run_id` to collect the final result.
+
+**Example:**
+```
+# Hand off after 5s if the cell is still running
+execute_cell(path="nb.ipynb", index=8, handoff_after_ms=5000)
+# → returns { run_id: "...", status: "running", partial output }
+
+# ...later, when the channel notification fires (or to poll):
+get_cell_run_output(run_id="...")
+# → final outputs once status is "idle"/"error"
+```
+
+---
+
+## get_cell_run_output
+
+Fetch the output for a run started by `execute_cell`/`execute_code` — typically one that handed off via `handoff_after_ms`. Works for runs **still executing** and **completed** runs alike. This is also the tool to call when a `<channel source="jupyter">` notification fires.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `run_id` | string | Yes | — | Run identifier returned by a handed-off execute call |
+| `kernel_id` | string | No | all kernels | Kernel ID to disambiguate. If omitted, all pooled kernels are searched |
+| `max_images` | number | No | all | Maximum images to return |
+| `include_images` | boolean | No | `true` | Include images in response |
+
+**Example:**
+```
+# Fetch results for a handed-off run
+get_cell_run_output(run_id="run_a3f8c2d1")
+```
+
+**Notes:**
+- Returns the run's current `status` (`running` / `idle` / `error`) plus collected outputs
+- Safe to call repeatedly to poll a still-running cell
 
 ---
 

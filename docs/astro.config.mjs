@@ -1,5 +1,6 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import starlightLlmsTxt from "starlight-llms-txt";
 
 export default defineConfig({
   site: "https://ianhi.github.io",
@@ -8,6 +9,13 @@ export default defineConfig({
     starlight({
       title: "JupyterLab Collab MCP",
       customCss: ["./src/styles/custom.css"],
+      plugins: [
+        starlightLlmsTxt({
+          projectName: "JupyterLab Collab MCP",
+          description:
+            "MCP server for real-time JupyterLab notebook collaboration — read, edit, and execute notebooks with bidirectional sync.",
+        }),
+      ],
       social: [
         {
           icon: "github",
