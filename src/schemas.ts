@@ -740,4 +740,28 @@ export const toolSchemas = [
       required: ["category", "summary"],
     },
   },
+  {
+    name: "notebook_guide",
+    description:
+      "Best practices for working with notebooks via this server. Call this FIRST when starting notebook work (or when unsure which tool to use) — returns guidance on reading, editing, executing, collaborating, and troubleshooting. Optionally pass a topic to get just one section.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          enum: [
+            "all",
+            "overview",
+            "reading",
+            "editing",
+            "execution",
+            "collaboration",
+            "troubleshooting",
+          ],
+          description:
+            "Which section to return. Omit or use 'all' for the full guide.",
+        },
+      },
+    },
+  },
 ];

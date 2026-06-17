@@ -24,6 +24,7 @@ import { handlers as executeHandlers } from "./handlers/execute.js";
 import { handlers as metadataHandlers } from "./handlers/metadata.js";
 import { handlers as kernelLspHandlers } from "./handlers/kernel-lsp.js";
 import { handlers as collabHandlers } from "./handlers/collab.js";
+import { handlers as guideHandlers } from "./handlers/guide.js";
 import { setNotifier, type HandoffCompletePayload } from "./notifications.js";
 
 // ============================================================================
@@ -38,6 +39,7 @@ const allHandlers: Record<string, (args: Record<string, unknown>) => Promise<any
   ...metadataHandlers,
   ...kernelLspHandlers,
   ...collabHandlers,
+  ...guideHandlers,
 };
 
 // ============================================================================
@@ -61,6 +63,8 @@ const server = new Server(
       },
     },
     instructions:
+      "New to this server or unsure which tool to use? Call notebook_guide for best practices on " +
+      "reading, editing, executing, and collaborating on notebooks.\n" +
       "When a <channel source=\"jupyter\"> tag arrives, a previously handed-off cell run has terminated. " +
       "Call get_cell_run_output(run_id=<meta.run_id>) to fetch the final output, then continue with whatever " +
       "the user originally asked you to do with that cell's result.",

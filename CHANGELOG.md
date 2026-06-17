@@ -4,6 +4,11 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-17
+
+### Added
+- **`notebook_guide` tool** — on-demand best-practices guide for working with notebooks through this server (reading, editing, executing, collaborating, troubleshooting). MCP servers can't register Claude Code skills over the protocol, so this delivers the same guidance as a tool whose output lands in the agent's context. Optional `topic` parameter returns just one section. The server `instructions` field now points agents to it.
+
 ## [0.10.1] - 2026-06-17
 
 ### Fixed

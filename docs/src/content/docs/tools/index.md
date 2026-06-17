@@ -1,9 +1,9 @@
 ---
 title: Tool Overview
-description: All 39 MCP tools organized by category.
+description: All 41 MCP tools organized by category.
 ---
 
-The MCP server provides 40 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
+The MCP server provides 41 tools for working with Jupyter notebooks. Tools are organized into categories below — click through for full parameter documentation and examples.
 
 ## Categories
 
@@ -71,3 +71,4 @@ Kernel status, variables, interrupt/restart, diagnostics, hover info, symbol ren
 | `rename_notebook` | Kernel | Rename notebook file |
 | `diff_notebooks` | Kernel | Compare two notebooks |
 | `report_issue` | Feedback | Submit a feedback report |
+| `notebook_guide` | Help | On-demand best-practices guide for working with notebooks |

@@ -5,6 +5,11 @@ description: Version history for jupyterlab-collab-mcp.
 
 All notable changes to the jupyterlab-collab-mcp.
 
+## [0.11.0] - 2026-06-17
+
+### Added
+- **`notebook_guide` tool** — on-demand best-practices guide (reading, editing, executing, collaborating, troubleshooting) delivered as tool output, with an optional `topic` parameter for a single section. The server now points agents to it on startup.
+
 ## [0.10.1] - 2026-06-17
 
 ### Fixed
