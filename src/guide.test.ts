@@ -60,4 +60,10 @@ describe("notebook_guide", () => {
     expect(out).toContain("report_issue");
     expect(out).toMatch(/pip install jupyter-collaboration/);
   });
+
+  it("explains persistent kernel state for iterative workflows", async () => {
+    const out = await text({ topic: "execution" });
+    expect(out).toMatch(/persist/i);
+    expect(out).toContain("kernel_variables");
+  });
 });

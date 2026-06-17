@@ -47,6 +47,10 @@ chosen automatically:
 - \`execute_cell\` — runs an existing cell *by index or id* and writes outputs
   back into the notebook. Use to (re)run cells the user can see.
 
+The kernel keeps state between calls — load expensive data once and iterate
+against the live objects rather than re-running setup each time (see the
+\`execution\` topic).
+
 Cell-indexed tools require the \`jupyter-collaboration\` server extension; if
 it is absent they fail with a clear message (see the \`troubleshooting\` topic).
 Kernel tools (\`execute_code\`, \`kernel\`) work without it.`,
@@ -92,7 +96,17 @@ Kernel tools (\`execute_code\`, \`kernel\`) work without it.`,
   handed-off run, read the result straight from \`get_cell_run_output\` (no
   \`filter_output\` step needed).
 - \`kernel(action="status"|"interrupt"|"restart")\` manages the kernel;
-  \`kernel_variables\` lists/inspects defined variables.`,
+  \`kernel_variables\` lists/inspects defined variables.
+
+### Persistent state — iterate, don't restart
+The kernel is long-lived: variables, imports, and loaded data persist across
+every \`execute_code\` / \`execute_cell\` call for the whole session. For
+data-intensive work this beats running standalone scripts — load or compute the
+expensive thing **once** (a large DataFrame, a fitted model, a parsed dataset),
+then iterate with small \`execute_code\` calls against the live objects instead
+of repeating setup. Use \`kernel_variables\` to see what's already defined, and
+only \`kernel(action="restart")\` when you genuinely need a clean slate (it
+discards all that state).`,
 
   collaboration: `## Sharing a notebook with a human
 
