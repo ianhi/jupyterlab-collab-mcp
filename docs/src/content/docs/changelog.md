@@ -5,6 +5,11 @@ description: Version history for jupyterlab-collab-mcp.
 
 All notable changes to the jupyterlab-collab-mcp.
 
+## [0.10.1] - 2026-06-17
+
+### Fixed
+- **Accurate error when `jupyter-collaboration` is missing** — cell-indexed tools (`get_notebook_content`, `execute_cell`, `insert_cell`, …) require the `jupyter-collaboration` server extension. On servers without it they previously reported a misleading "Notebook not found"; now `connect_jupyter` warns up front and the cell tools fail with an actionable "install jupyter-collaboration" message that distinguishes a missing extension from a genuinely missing notebook. Kernel tools (`execute_code`) are unaffected.
+
 ## [Unreleased]
 
 ### Changed
