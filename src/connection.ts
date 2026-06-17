@@ -51,6 +51,9 @@ export let jupyterConfig: JupyterConfig | null = null;
  */
 export function setJupyterConfig(config: JupyterConfig | null): void {
   jupyterConfig = config;
+  // Force a fresh RTC probe against the new connection (or clear it on
+  // disconnect) so a stale value never leaks across servers.
+  rtcAvailable = null;
 }
 
 export function getConfig() {
@@ -76,6 +79,40 @@ export interface LspStatus {
 }
 
 export let lspStatus: LspStatus = { available: false, servers: new Map() };
+
+// ============================================================================
+// Real-time-collaboration (jupyter-collaboration) availability
+// ============================================================================
+
+// Whether the connected server has the `jupyter-collaboration` extension.
+// null = not probed yet. Cell-level tools require this; kernel tools do not.
+export let rtcAvailable: boolean | null = null;
+
+export function setRtcAvailable(value: boolean | null): void {
+  rtcAvailable = value;
+}
+
+/**
+ * Probe whether the `jupyter-collaboration` server extension is installed by
+ * hitting the (PUT-only) collaboration session route with a GET:
+ *   - 405 (Method Not Allowed) → route exists, extension installed.
+ *   - 404 (Not Found) → route unregistered, extension absent.
+ *   - anything else (auth redirect/login shell, proxy 200, 5xx) or a network
+ *     error → inconclusive; leave the result unknown (null) so we never record
+ *     a false verdict and callers fall back to the per-request 404
+ *     disambiguation in `requestCollabSession`.
+ */
+export async function checkRtcAvailability(): Promise<boolean | null> {
+  try {
+    const res = await apiFetch("/api/collaboration/session/_probe.ipynb");
+    if (res.status === 405) rtcAvailable = true;
+    else if (res.status === 404) rtcAvailable = false;
+    else rtcAvailable = null;
+  } catch {
+    rtcAvailable = null;
+  }
+  return rtcAvailable;
+}
 
 export async function checkLspAvailability(): Promise<LspStatus> {
   const config = getConfig();
@@ -300,7 +337,45 @@ interface CollabSession {
   sessionId: string;
 }
 
+/**
+ * Check whether a notebook file exists via the Jupyter contents API,
+ * without fetching its content. Used to disambiguate a 404 from the
+ * real-time-collaboration endpoint: a missing file vs. the
+ * `jupyter-collaboration` server extension not being installed (which
+ * leaves `/api/collaboration/*` unrouted and returns 404 for any path).
+ */
+export async function notebookFileExists(path: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(
+      `/api/contents/${encodeURIComponent(path)}?content=0`
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Thrown when cell-level (RTC) tools are used against a server that lacks
+ * the `jupyter-collaboration` extension. Carries no special behaviour — it
+ * exists so the actionable message lives in one place. */
+export function rtcUnavailableError(path: string): Error {
+  return new Error(
+    `Real-time collaboration is unavailable on this JupyterLab server, so cell-level ` +
+      `tools cannot open '${path}'. The notebook exists and kernel tools (e.g. execute_code) ` +
+      `work, but cell-indexed tools (get_notebook_content, execute_cell, insert_cell, ` +
+      `batch_insert_cells, …) require the 'jupyter-collaboration' server extension.\n` +
+      `Fix: 'pip install jupyter-collaboration' (or 'conda install -c conda-forge ` +
+      `jupyter-collaboration'), then restart JupyterLab and reconnect.`
+  );
+}
+
 export async function requestCollabSession(path: string): Promise<CollabSession> {
+  // If we already learned at connect time that RTC is unavailable, fail fast
+  // with the actionable error rather than issuing a request we know will 404.
+  if (rtcAvailable === false) {
+    throw rtcUnavailableError(path);
+  }
+
   const response = await apiFetch(
     `/api/collaboration/session/${encodeURIComponent(path)}`,
     {
@@ -311,6 +386,18 @@ export async function requestCollabSession(path: string): Promise<CollabSession>
 
   if (!response.ok) {
     if (response.status === 404) {
+      // A 404 here is ambiguous only when we never got a definitive RTC verdict
+      // at connect time. The collaboration route is registered iff
+      // `jupyter-collaboration` is installed; without it the server 404s for
+      // *every* path. If the connect-time probe was inconclusive
+      // (rtcAvailable === null), disambiguate with a contents-API existence
+      // check so we can give an accurate, actionable error instead of the
+      // misleading "Notebook not found". If RTC was confirmed present
+      // (rtcAvailable === true), a 404 can only mean the file is genuinely
+      // missing, so skip the extra round-trip.
+      if (rtcAvailable === null && (await notebookFileExists(path))) {
+        throw rtcUnavailableError(path);
+      }
       throw new Error(`Notebook '${path}' not found. Check the path and try again.`);
     }
     throw new Error(

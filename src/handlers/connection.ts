@@ -9,6 +9,7 @@ import {
   setJupyterConfig,
   isJupyterConnected,
   checkLspAvailability,
+  checkRtcAvailability,
   apiFetch,
   listNotebookSessions,
   connectedNotebooks,
@@ -48,11 +49,24 @@ export const handlers: Record<
     const sessions: any[] = await response.json();
     const notebooks = sessions.filter((s) => s.type === "notebook");
 
-    // Check for LSP availability (optional enhancement)
-    const lsp = await checkLspAvailability();
+    // Check LSP and real-time-collaboration availability. Both are independent
+    // network probes, so run them concurrently to avoid doubling connect latency
+    // (notably on remote/proxied servers).
+    const [lsp, rtc] = await Promise.all([
+      checkLspAvailability(),
+      checkRtcAvailability(),
+    ]);
     const lspInfo = lsp.available
       ? `\n\nLSP available: ${[...lsp.servers.keys()].join(", ") || "checking..."}`
       : "\n\nLSP: not available (install jupyterlab-lsp for enhanced diagnostics)";
+
+    // RTC (jupyter-collaboration) is required by cell-level tools.
+    const rtcInfo =
+      rtc === false
+        ? "\n\n⚠ jupyter-collaboration NOT installed: cell-level tools " +
+          "(get_notebook_content, execute_cell, insert_cell, …) will not work. " +
+          "Kernel tools (execute_code) still work. Install with 'pip install jupyter-collaboration'."
+        : "";
 
     return {
       content: [
@@ -62,7 +76,7 @@ export const handlers: Record<
             notebooks.length > 0
               ? notebooks.map((n) => `- ${n.path}`).join("\n")
               : "(no notebooks open)"
-          }${lspInfo}`,
+          }${lspInfo}${rtcInfo}`,
         },
       ],
     };

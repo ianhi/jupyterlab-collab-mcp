@@ -4,6 +4,11 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-06-17
+
+### Fixed
+- **Accurate error when `jupyter-collaboration` is missing** — cell-indexed tools (`get_notebook_content`, `execute_cell`, `insert_cell`, `batch_insert_cells`, …) resolve notebooks through the real-time-collaboration endpoint, which is only present when the `jupyter-collaboration` server extension is installed. On servers without it, that endpoint returns 404 for every path, which was reported as a misleading `Notebook '<path>' not found` even though the notebook existed and kernel tools worked on it. Now `connect_jupyter` probes for the extension and warns up front, and the cell tools fail with an actionable "install jupyter-collaboration" message that distinguishes a missing extension from a genuinely missing notebook. Kernel tools (`execute_code`, `kernel`) are unaffected.
+
 ## [0.10.0] - 2026-06-11
 
 ### Added
