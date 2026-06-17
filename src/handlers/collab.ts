@@ -48,6 +48,67 @@ const SESSION_ID = crypto.randomUUID();
 const VALID_CATEGORIES = ["tool_bug", "hang", "missing_feature", "observation", "user_feedback"] as const;
 type ReportCategory = typeof VALID_CATEGORIES[number];
 
+/** GitHub repo that issues about this MCP server belong to. */
+const ISSUE_REPO = "ianhi/jupyterlab-collab-mcp";
+
+/**
+ * Build a ready-to-adapt GitHub issue from a report. Returns a structure (title
+ * + sectioned body) for the human or agent to fill in and refine — it does not
+ * prescribe whether or how the issue gets filed. Sections the report didn't
+ * supply are left as explicit prompts rather than omitted, so nothing important
+ * is silently dropped.
+ */
+export function buildIssueDraft(r: {
+  category: string;
+  summary: string;
+  tool_name?: string;
+  path?: string;
+  details?: string;
+}): string {
+  const fill = "_(fill in)_";
+  const isBug = r.category === "tool_bug" || r.category === "hang";
+
+  const lines: string[] = [
+    `This project (${ISSUE_REPO}) accepts fully agent-drafted issues — an issue whose entire content was written by an AI agent is welcome here.`,
+    "",
+    "Below is a structured draft to adapt:",
+    "",
+    "---",
+    `**Title:** [${r.category}] ${r.summary}`,
+    "",
+    "## Summary",
+    r.summary,
+    "",
+  ];
+
+  if (isBug) {
+    lines.push(
+      "## Steps to reproduce",
+      r.details ? r.details : `1. ${fill}`,
+      "",
+      "## Expected behavior",
+      fill,
+      "",
+      "## Actual behavior",
+      r.details ? "See details above." : fill,
+      ""
+    );
+  } else {
+    lines.push("## Details", r.details ? r.details : fill, "");
+  }
+
+  lines.push(
+    "## Context",
+    `- Tool: ${r.tool_name ?? "n/a"}`,
+    `- Notebook path: ${r.path ?? "n/a"}`,
+    `- jupyterlab-collab-mcp version: ${fill}`,
+    `- JupyterLab / kernel: ${fill}`,
+    "---"
+  );
+
+  return lines.join("\n");
+}
+
 /**
  * Rotate the reports file if it exceeds REPORTS_MAX_BYTES.
  * Keeps the most recent half of the file (by bytes) to avoid
@@ -542,18 +603,22 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     if (path) report.path = path;
     if (details) report.details = details;
 
+    // Best-effort local log; never let a write failure block the draft below.
+    let logged = true;
     try {
       appendFileSync(REPORTS_PATH, JSON.stringify(report) + "\n");
       rotateReportsIfNeeded();
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: `Failed to write report: ${err instanceof Error ? err.message : String(err)}` }],
-        isError: true,
-      };
+    } catch {
+      logged = false;
     }
 
+    const draft = buildIssueDraft({ category, summary, tool_name, path, details });
+    const logLine = logged
+      ? `Logged locally to ${REPORTS_PATH}.`
+      : `(Could not write the local log; the draft below is unaffected.)`;
+
     return {
-      content: [{ type: "text", text: `Report submitted: [${category}] ${summary}` }],
+      content: [{ type: "text", text: `${logLine}\n\n${draft}` }],
     };
   },
 

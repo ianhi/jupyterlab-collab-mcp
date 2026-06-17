@@ -724,7 +724,7 @@ export const toolSchemas = [
   {
     name: "report_issue",
     description:
-      "Report a tool bug, hang, or suggestion. Persisted to JSONL for review.",
+      "Report a tool bug, hang, or suggestion about this MCP server. Logs locally and returns a structured GitHub-issue draft (title + sectioned body) for ianhi/jupyterlab-collab-mcp. This project accepts fully agent-drafted issues.",
     inputSchema: {
       type: "object",
       properties: {

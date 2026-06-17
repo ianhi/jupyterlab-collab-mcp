@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { buildIssueDraft } from "./handlers/collab.js";
 
 // We test the handler by importing it and mocking the file path.
 // The handler is in collab.ts but uses module-level constants.
@@ -522,5 +523,55 @@ describe("report_issue validation logic", () => {
         summary: '`code` "quotes" <tags> $vars {{braces}} \\ backslash',
       }).valid
     ).toBe(true);
+  });
+});
+
+describe("buildIssueDraft", () => {
+  it("states the project accepts fully agent-drafted issues", () => {
+    const out = buildIssueDraft({ category: "observation", summary: "x" });
+    expect(out).toMatch(/accepts fully agent-drafted issues/i);
+    expect(out).toContain("ianhi/jupyterlab-collab-mcp");
+  });
+
+  it("builds a title as [category] summary", () => {
+    const out = buildIssueDraft({ category: "tool_bug", summary: "execute_cell hangs" });
+    expect(out).toContain("[tool_bug] execute_cell hangs");
+  });
+
+  it("uses bug-shaped sections for tool_bug and hang", () => {
+    for (const category of ["tool_bug", "hang"]) {
+      const out = buildIssueDraft({ category, summary: "s" });
+      expect(out).toContain("## Steps to reproduce");
+      expect(out).toContain("## Expected behavior");
+      expect(out).toContain("## Actual behavior");
+    }
+  });
+
+  it("uses a plain Details section for non-bug categories", () => {
+    const out = buildIssueDraft({ category: "missing_feature", summary: "s" });
+    expect(out).toContain("## Details");
+    expect(out).not.toContain("## Steps to reproduce");
+  });
+
+  it("includes context, surfacing tool/path or n/a", () => {
+    const withCtx = buildIssueDraft({
+      category: "tool_bug",
+      summary: "s",
+      tool_name: "execute_cell",
+      path: "a.ipynb",
+    });
+    expect(withCtx).toContain("- Tool: execute_cell");
+    expect(withCtx).toContain("- Notebook path: a.ipynb");
+
+    const without = buildIssueDraft({ category: "tool_bug", summary: "s" });
+    expect(without).toContain("- Tool: n/a");
+    expect(without).toContain("- Notebook path: n/a");
+  });
+
+  it("does not prescribe how to file the issue", () => {
+    const out = buildIssueDraft({ category: "tool_bug", summary: "s" }).toLowerCase();
+    // No filing mechanics — that's the user's/agent's call, not the server's.
+    expect(out).not.toContain("gh issue");
+    expect(out).not.toContain("git ");
   });
 });

@@ -10,6 +10,9 @@ All notable changes to the jupyterlab-collab-mcp.
 ### Added
 - **`notebook_guide` tool** — on-demand best-practices guide (reading, editing, executing, collaborating, troubleshooting) delivered as tool output, with an optional `topic` parameter for a single section. The server now points agents to it on startup.
 
+### Changed
+- **`report_issue` now returns a structured GitHub-issue draft** for `ianhi/jupyterlab-collab-mcp` (title + sectioned body) alongside the local log, and notes that the project accepts fully agent-drafted issues. It doesn't prescribe how the issue gets filed.
+
 ## [0.10.1] - 2026-06-17
 
 ### Fixed

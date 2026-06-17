@@ -134,8 +134,9 @@ notebook and reproducible later.`,
   \`connect_jupyter\` warns up front when it's missing.
 - **LSP features** (\`get_diagnostics\`, \`get_hover_info\`, \`rename_symbol\`) need
   \`jupyterlab-lsp\` + a Python language server; they degrade gracefully if absent.
-- Hit a tool bug, hang, or have a suggestion? Use \`report_issue\` — it's
-  persisted for the maintainers to review.`,
+- Hit a tool bug, hang, or have a suggestion? Use \`report_issue\` — it logs the
+  report locally and returns a structured GitHub-issue draft for the project.
+  This project accepts fully agent-drafted issues.`,
 };
 
 const TOPIC_ORDER: Topic[] = [
