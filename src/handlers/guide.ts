@@ -103,10 +103,16 @@ The kernel is long-lived: variables, imports, and loaded data persist across
 every \`execute_code\` / \`execute_cell\` call for the whole session. For
 data-intensive work this beats running standalone scripts — load or compute the
 expensive thing **once** (a large DataFrame, a fitted model, a parsed dataset),
-then iterate with small \`execute_code\` calls against the live objects instead
-of repeating setup. Use \`kernel_variables\` to see what's already defined, and
-only \`kernel(action="restart")\` when you genuinely need a clean slate (it
-discards all that state).`,
+then iterate against the live objects instead of repeating setup. Use
+\`kernel_variables\` to see what's already defined, and only
+\`kernel(action="restart")\` when you genuinely need a clean slate (it discards
+all that state).
+
+Mind the visibility tradeoff: \`execute_code\` is fast for throwaway probes but
+is **invisible to the human and not saved**. When an experiment matters — or a
+collaborator is watching — promote it into a notebook cell
+(\`insert_cell\`/\`execute_cell\`) so the code and its output are visible in the
+notebook and reproducible later.`,
 
   collaboration: `## Sharing a notebook with a human
 
