@@ -725,6 +725,37 @@ describe("extractMarkdownHeaders", () => {
     const headers = extractMarkdownHeaders("#NoSpace");
     expect(headers).toEqual([]);
   });
+
+  it("ignores # comment lines inside fenced code blocks", () => {
+    const source = [
+      "# Real Header",
+      "",
+      "```python",
+      "# zarr/core.py:217  not a header",
+      "x = 1  # inline",
+      "## also not a header",
+      "```",
+      "## Second Real Header",
+    ].join("\n");
+    const headers = extractMarkdownHeaders(source);
+    expect(headers).toEqual([
+      { level: 1, text: "Real Header" },
+      { level: 2, text: "Second Real Header" },
+    ]);
+  });
+
+  it("handles tilde fences and only closes on the matching fence char", () => {
+    const source = [
+      "~~~",
+      "# inside tilde fence",
+      "```",
+      "# still inside (backticks don't close a tilde fence)",
+      "~~~",
+      "# After Fence",
+    ].join("\n");
+    const headers = extractMarkdownHeaders(source);
+    expect(headers).toEqual([{ level: 1, text: "After Fence" }]);
+  });
 });
 
 describe("getCodePreview", () => {
