@@ -744,6 +744,19 @@ describe("extractMarkdownHeaders", () => {
     ]);
   });
 
+  it("a shorter fence inside a longer one does not close it (CommonMark length rule)", () => {
+    const source = [
+      "````",
+      "# inside outer fence",
+      "```",
+      "# still inside (shorter fence cannot close the longer one)",
+      "````",
+      "## After Fence",
+    ].join("\n");
+    const headers = extractMarkdownHeaders(source);
+    expect(headers).toEqual([{ level: 2, text: "After Fence" }]);
+  });
+
   it("handles tilde fences and only closes on the matching fence char", () => {
     const source = [
       "~~~",
