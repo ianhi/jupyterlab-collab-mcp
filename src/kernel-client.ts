@@ -382,14 +382,7 @@ export class KernelClient {
   close(reason: string = "client closed"): void {
     this.failAllInFlight(reason);
     this.failAllOpenWaiters(new Error(reason));
-    if (this.openTimer) {
-      clearTimeout(this.openTimer);
-      this.openTimer = null;
-    }
-    if (this.kernelInfoTimer) {
-      clearInterval(this.kernelInfoTimer);
-      this.kernelInfoTimer = null;
-    }
+    this.clearConnectTimers();
     const ws = this.ws;
     this.ws = null;
     if (this.state !== "closed") {
@@ -489,6 +482,18 @@ export class KernelClient {
     });
   }
 
+  /** Clear the connection-phase timers (open deadline + kernel_info retry). */
+  private clearConnectTimers(): void {
+    if (this.openTimer) {
+      clearTimeout(this.openTimer);
+      this.openTimer = null;
+    }
+    if (this.kernelInfoTimer) {
+      clearInterval(this.kernelInfoTimer);
+      this.kernelInfoTimer = null;
+    }
+  }
+
   /** Send a kernel_info_request on the shell channel to probe readiness. */
   private sendKernelInfoRequest(): void {
     if (!this.ws) return;
@@ -521,14 +526,7 @@ export class KernelClient {
    */
   private markReady(): void {
     if (this.state !== "connecting") return;
-    if (this.openTimer) {
-      clearTimeout(this.openTimer);
-      this.openTimer = null;
-    }
-    if (this.kernelInfoTimer) {
-      clearInterval(this.kernelInfoTimer);
-      this.kernelInfoTimer = null;
-    }
+    this.clearConnectTimers();
     this.state = "open";
     this._lastActivityAt = Date.now();
     const waiters = this.openWaiters;
@@ -648,14 +646,7 @@ export class KernelClient {
   private handleSocketDown(reason: string): void {
     if (this.state === "closed") return;
     this.state = "closed";
-    if (this.openTimer) {
-      clearTimeout(this.openTimer);
-      this.openTimer = null;
-    }
-    if (this.kernelInfoTimer) {
-      clearInterval(this.kernelInfoTimer);
-      this.kernelInfoTimer = null;
-    }
+    this.clearConnectTimers();
     this.failAllInFlight(reason);
     this.failAllOpenWaiters(new Error(reason));
     this.ws = null;
