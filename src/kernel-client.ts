@@ -134,6 +134,8 @@ export interface RunOptions {
 }
 
 const DEFAULT_OPEN_TIMEOUT_MS = 10_000;
+/** How often to re-send the kernel_info probe until the kernel replies. */
+const KERNEL_INFO_RETRY_MS = 500;
 const MAX_RETAINED_RUNS = 100;
 const COMPLETED_RUN_TTL_MS = 30 * 60 * 1000;
 
@@ -151,6 +153,13 @@ export class KernelClient {
     reject: (e: Error) => void;
   }> = [];
   private openTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Retry timer for the kernel_info readiness probe. While the WS is open but
+   * the kernel hasn't replied to kernel_info yet, we re-send periodically to
+   * defeat the ZMQ slow-joiner race (a probe sent before the kernel's channels
+   * are subscribed is silently dropped).
+   */
+  private kernelInfoTimer: ReturnType<typeof setInterval> | null = null;
 
   private readonly inFlight = new Map<string, InFlightRun>();
   /** Insertion-ordered map of all known runs (LRU eviction from the front). */
@@ -377,6 +386,10 @@ export class KernelClient {
       clearTimeout(this.openTimer);
       this.openTimer = null;
     }
+    if (this.kernelInfoTimer) {
+      clearInterval(this.kernelInfoTimer);
+      this.kernelInfoTimer = null;
+    }
     const ws = this.ws;
     this.ws = null;
     if (this.state !== "closed") {
@@ -416,15 +429,19 @@ export class KernelClient {
     this.ws = ws;
 
     ws.on("open", () => {
-      if (this.openTimer) {
-        clearTimeout(this.openTimer);
-        this.openTimer = null;
-      }
-      this.state = "open";
       this._lastActivityAt = Date.now();
-      const waiters = this.openWaiters;
-      this.openWaiters = [];
-      for (const w of waiters) w.resolve();
+      // The socket being open does NOT mean the kernel is ready to receive:
+      // its ZMQ channels may not be subscribed yet, so an execute_request sent
+      // now can be silently dropped (slow-joiner race). Stay in "connecting"
+      // and probe with kernel_info_request until we get a reply — only then do
+      // we resolve openWaiters and let queued runs send their requests.
+      this.sendKernelInfoRequest();
+      if (!this.kernelInfoTimer) {
+        this.kernelInfoTimer = setInterval(() => {
+          if (this.state === "connecting") this.sendKernelInfoRequest();
+        }, KERNEL_INFO_RETRY_MS);
+        this.kernelInfoTimer.unref?.();
+      }
     });
 
     ws.on("message", (data: unknown) => {
@@ -438,6 +455,12 @@ export class KernelClient {
             : (data as { toString(): string }).toString();
         msg = JSON.parse(str);
       } catch {
+        return;
+      }
+      // Readiness handshake: the first kernel_info_reply confirms the kernel's
+      // channels are live. Resolve any waiters and start dispatching runs.
+      if (msg?.msg_type === "kernel_info_reply") {
+        this.markReady();
         return;
       }
       const parentMsgId = msg?.parent_header?.msg_id;
@@ -464,6 +487,53 @@ export class KernelClient {
     return new Promise<void>((resolve, reject) => {
       this.openWaiters.push({ resolve, reject });
     });
+  }
+
+  /** Send a kernel_info_request on the shell channel to probe readiness. */
+  private sendKernelInfoRequest(): void {
+    if (!this.ws) return;
+    const msg = {
+      header: {
+        msg_id: crypto.randomUUID(),
+        msg_type: "kernel_info_request",
+        username: "claude",
+        session: crypto.randomUUID(),
+        date: new Date().toISOString(),
+        version: "5.3",
+      },
+      parent_header: {},
+      metadata: {},
+      content: {},
+      buffers: [],
+      channel: "shell",
+    };
+    try {
+      this.ws.send(JSON.stringify(msg));
+    } catch {
+      // Socket went down mid-probe; the close/error handlers will recover.
+    }
+  }
+
+  /**
+   * Transition from "connecting" to "open" once the kernel has proven it can
+   * receive on its channels (kernel_info_reply). Idempotent: extra replies are
+   * ignored.
+   */
+  private markReady(): void {
+    if (this.state !== "connecting") return;
+    if (this.openTimer) {
+      clearTimeout(this.openTimer);
+      this.openTimer = null;
+    }
+    if (this.kernelInfoTimer) {
+      clearInterval(this.kernelInfoTimer);
+      this.kernelInfoTimer = null;
+    }
+    this.state = "open";
+    this._lastActivityAt = Date.now();
+    const waiters = this.openWaiters;
+    this.openWaiters = [];
+    for (const w of waiters) w.resolve();
   }
 
   private ingest(inflight: InFlightRun, msg: any): void {
@@ -581,6 +651,10 @@ export class KernelClient {
     if (this.openTimer) {
       clearTimeout(this.openTimer);
       this.openTimer = null;
+    }
+    if (this.kernelInfoTimer) {
+      clearInterval(this.kernelInfoTimer);
+      this.kernelInfoTimer = null;
     }
     this.failAllInFlight(reason);
     this.failAllOpenWaiters(new Error(reason));
