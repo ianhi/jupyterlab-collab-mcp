@@ -341,7 +341,7 @@ export const toolSchemas = [
   {
     name: "batch_insert_cells",
     description:
-      "Insert multiple cells at once. Indices auto-adjust for prior insertions.",
+      "Insert multiple cells at once, applied in order. Each `index` is the literal position in the notebook as it stands at that step (after earlier inserts in this batch). For a contiguous block, pass increasing indices (e.g. 20, 21, 22) or anchor with `cell_id`. Omit index to append.",
     inputSchema: {
       type: "object",
       properties: {
@@ -354,7 +354,7 @@ export const toolSchemas = [
               source: { type: "string", description: "Cell source" },
               cell_type: { type: "string", enum: ["code", "markdown"], description: "Default: code" },
               cell_id: { type: "string", description: "Insert after this cell ID" },
-              index: { type: "number", description: "Position (0=start, omit=end)" },
+              index: { type: "number", description: "Literal position at this step (0=start, omit/-1=append). For a contiguous block use increasing indices." },
             },
             required: ["source"],
           },

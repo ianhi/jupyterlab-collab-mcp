@@ -825,7 +825,38 @@ describe("batch_insert_cells (filesystem)", () => {
     expect(changes[1].client).toBe("test-agent");
   });
 
-  it("inserts at specific index with offset tracking", async () => {
+  it("inserts a contiguous block when given increasing indices", async () => {
+    const path = await copyFixture("simple.ipynb", tmpDir);
+    clearTracker(path);
+    const before = await readNotebook(path);
+    const origLen = before.cells.length; // 7
+    const at = 2;
+    const origAt = extractSource(before.cells[at]);
+    const origNext = extractSource(before.cells[at + 1]);
+
+    // Caller wants 3 contiguous cells at positions 2,3,4 — passes those indices.
+    await cellWriteHandlers["batch_insert_cells"]({
+      path,
+      inserts: [
+        { source: "block_0", index: 2 },
+        { source: "block_1", index: 3 },
+        { source: "block_2", index: 4 },
+      ],
+    });
+
+    const nb = await readNotebook(path);
+    expect(nb.cells.length).toBe(origLen + 3);
+    // The three new cells are contiguous and in list order — NOT interleaved
+    // with the existing cells.
+    expect(extractSource(nb.cells[2])).toBe("block_0");
+    expect(extractSource(nb.cells[3])).toBe("block_1");
+    expect(extractSource(nb.cells[4])).toBe("block_2");
+    // The cell originally at `at` was pushed down past the whole block.
+    expect(extractSource(nb.cells[5])).toBe(origAt);
+    expect(extractSource(nb.cells[6])).toBe(origNext);
+  });
+
+  it("treats index as the live position at each step (repeated index reverses)", async () => {
     const path = await copyFixture("simple.ipynb", tmpDir);
     clearTracker(path);
 
@@ -838,11 +869,10 @@ describe("batch_insert_cells (filesystem)", () => {
     });
 
     const nb = await readNotebook(path);
-    // Both specified index 0, but offset should shift the second one
-    // First insert: index 0 + offset 0 = 0
-    // Second insert: index 0 + offset 1 = 1
-    expect(extractSource(nb.cells[0])).toBe("cell_A");
-    expect(extractSource(nb.cells[1])).toBe("cell_B");
+    // Each insert targets the literal index 0, so the second pushes the first
+    // down: B ends up at 0, A at 1.
+    expect(extractSource(nb.cells[0])).toBe("cell_B");
+    expect(extractSource(nb.cells[1])).toBe("cell_A");
   });
 
   it("inserts markdown cells", async () => {
