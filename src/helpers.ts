@@ -439,7 +439,29 @@ export function extractMarkdownHeaders(source: string): { level: number; text: s
   const headers: { level: number; text: string }[] = [];
   const lines = source.split("\n");
 
+  // Track fenced code blocks (``` or ~~~, indented up to 3 spaces) so that
+  // `#` comment lines inside them aren't misread as markdown headers.
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLen = 0;
+
   for (const line of lines) {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const run = fenceMatch[1];
+      const char = run[0] as "`" | "~";
+      if (fenceChar === null) {
+        fenceChar = char; // opening fence
+        fenceLen = run.length;
+      } else if (fenceChar === char && run.length >= fenceLen) {
+        // Closing fence: must match the opener's char and be at least as long
+        // (CommonMark) — so a shorter fence inside a longer one doesn't close it.
+        fenceChar = null;
+        fenceLen = 0;
+      }
+      continue;
+    }
+    if (fenceChar !== null) continue; // inside a code fence — not a header
+
     const match = line.match(/^(#{1,6})\s+(.+)/);
     if (match) {
       headers.push({

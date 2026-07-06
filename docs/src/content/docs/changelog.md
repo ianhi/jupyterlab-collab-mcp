@@ -5,13 +5,22 @@ description: Version history for jupyterlab-collab-mcp.
 
 All notable changes to the jupyterlab-collab-mcp.
 
-## [0.11.0] - 2026-06-17
+## [0.12.0] - 2026-07-06
 
 ### Added
 - **`notebook_guide` tool** — on-demand best-practices guide (reading, editing, executing, collaborating, troubleshooting) delivered as tool output, with an optional `topic` parameter for a single section. The server now points agents to it on startup.
 
 ### Changed
 - **`report_issue` now returns a structured GitHub-issue draft** for `ianhi/jupyterlab-collab-mcp` (title + sectioned body) alongside the local log, and notes that the project accepts fully agent-drafted issues. It doesn't prescribe how the issue gets filed.
+
+## [0.11.0] - 2026-07-06
+
+### Fixed
+- **Kernel cold-start execution race** — the first `execute_request` could be sent before the kernel's ZMQ channels were subscribed and get silently dropped, hanging the run until timeout. The client now completes a `kernel_info` readiness handshake (re-probed until the kernel replies) before dispatching any run.
+- **Outline misread `#` comments inside fenced code blocks** — `get_notebook_outline` treated `#` lines inside ` ``` ` / `~~~` code fences as markdown headers. Fenced blocks are now tracked and skipped.
+
+### Changed
+- **`batch_insert_cells` index semantics** *(breaking)* — each `index` is now the literal position in the notebook as it stands at that step, applied in list order. Passing increasing indices for a contiguous block previously interleaved the new cells with existing ones; now they land contiguously. For a block, pass increasing indices or anchor with `cell_id`.
 
 ## [0.10.1] - 2026-06-17
 
