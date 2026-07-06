@@ -577,7 +577,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const cells = notebook.cells;
 
       const results: string[] = [];
-      let offset = 0;
 
       for (const ins of inserts) {
         const cellType = ins.cell_type || "code";
@@ -589,7 +588,11 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
           ...(cellType === "code" ? { outputs: [], execution_count: null } : {}),
         };
 
-        // Resolve insert position
+        // Resolve insert position. Inserts are applied in array order, and
+        // `index` is the literal position in the notebook as it stands right
+        // now (after any earlier inserts in this batch) — the same coordinate
+        // system cell_id and append already use. So increasing contiguous
+        // indices (20, 21, 22, …) land as a contiguous block.
         let insertIndex: number;
         if (ins.cell_id !== undefined) {
           if (ins.index !== undefined) throw new Error("Specify either 'index' or 'cell_id' per insert, not both.");
@@ -597,7 +600,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         } else if (ins.index === undefined || ins.index === -1) {
           insertIndex = cells.length;
         } else {
-          insertIndex = ins.index + offset;
+          insertIndex = ins.index;
         }
 
         if (insertIndex < 0 || insertIndex > cells.length) {
@@ -605,7 +608,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         }
 
         cells.splice(insertIndex, 0, newCell);
-        offset++;
 
         const newId = (newCell.id || "").slice(0, 8);
         recordChange(path, {
@@ -634,7 +636,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     const cells = doc.getArray("cells");
 
     const results: string[] = [];
-    let offset = 0;
 
     for (const ins of inserts) {
       const cellType = ins.cell_type || "code";
@@ -649,7 +650,11 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       const newCellId = crypto.randomUUID();
       newCell.set("id", newCellId);
 
-      // Resolve insert position
+      // Resolve insert position. Inserts are applied in array order, and
+      // `index` is the literal position in the notebook as it stands right
+      // now (after any earlier inserts in this batch) — the same coordinate
+      // system cell_id and append already use. So increasing contiguous
+      // indices (20, 21, 22, …) land as a contiguous block.
       let insertIndex: number;
       if (ins.cell_id !== undefined) {
         if (ins.index !== undefined) throw new Error("Specify either 'index' or 'cell_id' per insert, not both.");
@@ -657,7 +662,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       } else if (ins.index === undefined || ins.index === -1) {
         insertIndex = cells.length;
       } else {
-        insertIndex = ins.index + offset;
+        insertIndex = ins.index;
       }
 
       if (insertIndex < 0 || insertIndex > cells.length) {
@@ -665,7 +670,6 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       }
 
       cells.insert(insertIndex, [newCell]);
-      offset++;
 
       const newId = newCellId.slice(0, 8);
       recordChange(path, {
