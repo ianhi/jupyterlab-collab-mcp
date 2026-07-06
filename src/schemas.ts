@@ -724,7 +724,7 @@ export const toolSchemas = [
   {
     name: "report_issue",
     description:
-      "Report a tool bug, hang, or suggestion. Persisted to JSONL for review.",
+      "Report a tool bug, hang, or suggestion about this MCP server. Logs locally and returns a structured GitHub-issue draft (title + sectioned body) for ianhi/jupyterlab-collab-mcp. This project accepts fully agent-drafted issues.",
     inputSchema: {
       type: "object",
       properties: {
@@ -738,6 +738,30 @@ export const toolSchemas = [
         details: { type: "string", description: "Error messages or repro steps" },
       },
       required: ["category", "summary"],
+    },
+  },
+  {
+    name: "notebook_guide",
+    description:
+      "Best practices for working with notebooks via this server. Call this FIRST when starting notebook work (or when unsure which tool to use) — returns guidance on reading, editing, executing, collaborating, and troubleshooting. Optionally pass a topic to get just one section.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        topic: {
+          type: "string",
+          enum: [
+            "all",
+            "overview",
+            "reading",
+            "editing",
+            "execution",
+            "collaboration",
+            "troubleshooting",
+          ],
+          description:
+            "Which section to return. Omit or use 'all' for the full guide.",
+        },
+      },
     },
   },
 ];

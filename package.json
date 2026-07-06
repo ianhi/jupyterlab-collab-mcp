@@ -7,6 +7,9 @@
     "type": "git",
     "url": "git+https://github.com/ianhi/jupyterlab-collab-mcp.git"
   },
+  "bugs": {
+    "url": "https://github.com/ianhi/jupyterlab-collab-mcp/issues"
+  },
   "homepage": "https://ianhuntisaak.com/jupyterlab-collab-mcp/",
   "keywords": [
     "mcp",
