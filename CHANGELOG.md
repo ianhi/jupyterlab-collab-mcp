@@ -4,6 +4,15 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-06
+
+### Fixed
+- **Kernel cold-start execution race** — `KernelClient` sent the first `execute_request` as soon as its WebSocket opened, before the kernel's ZMQ channels were subscribed, so on a cold start the request could be silently dropped and the run hung until its timeout (needing a manual kernel restart to recover). The client now completes a `kernel_info` readiness handshake — re-probed every 500ms until the kernel replies — before dispatching any run, so nothing is sent into the dead window. (#13)
+- **Outline misread `#` comments inside fenced code blocks** — `get_notebook_outline` treated `#` lines inside ` ``` ` / `~~~` code fences (e.g. a `# path/to/file.py:217` comment) as markdown headers. Fenced blocks are now tracked — including the CommonMark rule that a closing fence must be at least as long as the opener — and their contents skipped. (#13)
+
+### Changed
+- **`batch_insert_cells` index semantics** *(breaking)* — each `index` is now the literal position in the notebook as it stands at that step, with inserts applied in list order (the same coordinate system `cell_id` and append already used). Previously an internal offset was added on top, so passing increasing indices for a contiguous block (e.g. `20, 21, 22`) interleaved the new cells with the existing ones. To insert a contiguous block, pass increasing indices or anchor with `cell_id`. (#14)
+
 ## [0.10.1] - 2026-06-17
 
 ### Fixed
