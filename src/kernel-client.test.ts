@@ -25,13 +25,40 @@ class FakeWebSocket implements KernelWebSocket {
   };
   sent: string[] = [];
   closed = false;
+  /** When false, suppress the automatic kernel_info_reply (slow-joiner sim). */
+  autoKernelInfo = true;
+  kernelInfoRequests = 0;
 
   on(event: string, listener: Listener): void {
     this.listeners[event].push(listener);
   }
 
   send(data: string): void {
+    // Emulate a live kernel: answer the readiness probe immediately and don't
+    // count it as a user-visible send (keeps `sent`/`lastMsgId` assertions on
+    // execute_requests intact).
+    const parsed = JSON.parse(data);
+    if (parsed.header.msg_type === "kernel_info_request") {
+      this.kernelInfoRequests++;
+      if (this.autoKernelInfo) {
+        this.fireMessage({
+          parent_header: { msg_id: parsed.header.msg_id },
+          msg_type: "kernel_info_reply",
+          content: {},
+        });
+      }
+      return;
+    }
     this.sent.push(data);
+  }
+
+  /** Manually answer the readiness probe (for tests with autoKernelInfo=false). */
+  replyKernelInfo(): void {
+    this.fireMessage({
+      parent_header: { msg_id: "probe" },
+      msg_type: "kernel_info_reply",
+      content: {},
+    });
   }
 
   close(): void {
@@ -128,6 +155,56 @@ describe("KernelClient", () => {
     const result = expectResult(outcome);
     expect(result.status).toBe("ok");
     expect(result.executionCount).toBe(7);
+  });
+
+  it("does not send execute_request until kernel_info_reply arrives (slow-joiner guard)", async () => {
+    const client = makeClient();
+    fake.autoKernelInfo = false;
+
+    const runPromise = client.run("print(1)", { timeoutMs: 5000 });
+    fake.fireOpen();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // WS is open but the kernel hasn't acknowledged readiness: the run must be
+    // held back, not fired into the dead window.
+    expect(client.isHealthy()).toBe(false);
+    expect(fake.sent.length).toBe(0);
+    expect(fake.kernelInfoRequests).toBeGreaterThanOrEqual(1);
+
+    // Kernel becomes ready -> run is now dispatched.
+    fake.replyKernelInfo();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(client.isHealthy()).toBe(true);
+    expect(fake.sent.length).toBe(1);
+
+    fake.fireMessage(replyOk(fake.lastMsgId(), 1));
+    const result = expectResult(await runPromise);
+    expect(result.status).toBe("ok");
+  });
+
+  it("re-sends the kernel_info probe until the kernel replies", async () => {
+    vi.useFakeTimers();
+    const client = makeClient();
+    fake.autoKernelInfo = false;
+
+    const runPromise = client.run("print(1)", { timeoutMs: 60_000 });
+    runPromise.catch(() => {});
+    fake.fireOpen();
+    await Promise.resolve();
+    expect(fake.kernelInfoRequests).toBe(1);
+
+    // Probe was dropped (slow joiner) — the retry timer should re-send.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(fake.kernelInfoRequests).toBeGreaterThanOrEqual(2);
+
+    fake.replyKernelInfo();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(client.isHealthy()).toBe(true);
+    fake.fireMessage(replyOk(fake.lastMsgId(), 1));
+    await runPromise;
   });
 
   it("reuses one WebSocket across multiple runs", async () => {

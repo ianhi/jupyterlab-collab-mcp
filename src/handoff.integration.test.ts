@@ -43,6 +43,15 @@ class FakeWebSocket implements KernelWebSocket {
     this.listeners[event].push(listener);
   }
   send(data: string): void {
+    const parsed = JSON.parse(data);
+    if (parsed.header.msg_type === "kernel_info_request") {
+      this.fireMessage({
+        parent_header: { msg_id: parsed.header.msg_id },
+        msg_type: "kernel_info_reply",
+        content: {},
+      });
+      return;
+    }
     this.sent.push(data);
   }
   close(): void {
