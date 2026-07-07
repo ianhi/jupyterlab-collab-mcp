@@ -6,7 +6,7 @@
  * extra `handed_off` terminal-for-the-caller state for slow runs.
  *
  * `run(code, opts)` supports two modes:
- *  - `timeoutMs` only (legacy): hard deadline; rejects on exceed.
+ *  - `timeoutMs` only: hard deadline; rejects on exceed.
  *  - `handoffAfterMs` provided: if the run hasn't terminated after
  *    `handoffAfterMs`, resolves with `kind: "handoff"` carrying the
  *    accumulated partial output and the `run_id`. The Run keeps living
@@ -218,23 +218,9 @@ export class KernelClient {
 
   /**
    * Submit `code` for execution. Returns a `RunOutcome` describing whether
-   * the run completed inline or was handed off.
-   *
-   * Overloads:
-   *   - `run(code, timeoutMs)` — numeric form: hard deadline only.
-   *   - `run(code, opts)` — options form with optional `handoffAfterMs`.
+   * the run completed inline (`timeoutMs`) or was handed off (`handoffAfterMs`).
    */
-  run(code: string, opts: RunOptions): Promise<RunOutcome>;
-  // Legacy numeric form retained for older callers.
-  run(code: string, timeoutMs: number): Promise<RunOutcome>;
-  run(
-    code: string,
-    optsOrTimeout: RunOptions | number
-  ): Promise<RunOutcome> {
-    const opts: RunOptions =
-      typeof optsOrTimeout === "number"
-        ? { timeoutMs: optsOrTimeout }
-        : optsOrTimeout;
+  run(code: string, opts: RunOptions): Promise<RunOutcome> {
     // Kick off WS open synchronously so the pool sees a connecting client
     // even before the caller awaits — tests and idle eviction both rely on
     // `factoryCalls`/state being observable on the same tick.
@@ -311,7 +297,7 @@ export class KernelClient {
         hardTimeoutMs !== undefined &&
         opts.handoffAfterMs === undefined
       ) {
-        // Legacy: hard reject after timeoutMs.
+        // No handoff requested: hard-reject once timeoutMs elapses.
         const secs = Math.max(1, Math.round(hardTimeoutMs / 1000));
         inflight.hardTimer = setTimeout(() => {
           if (this.inFlight.delete(msgId)) {

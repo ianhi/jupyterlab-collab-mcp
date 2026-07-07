@@ -578,9 +578,9 @@ export function getKernelClient(kernelId: string): KernelClient {
 }
 
 /**
- * Close and remove the pooled client for `kernelId`, if any. Intended to be
- * wired into restart_kernel and disconnect flows; currently unwired (no caller),
- * so a kernel's client is only reaped by idle eviction or socket close.
+ * Close and remove the pooled client for `kernelId`, if any. Has no caller —
+ * a kernel's client is otherwise reaped only by idle eviction or socket close.
+ * Available for restart_kernel/disconnect flows to force-drop a client.
  */
 export function closeKernelClient(kernelId: string, reason: string = "explicit close"): void {
   const client = kernelClients.get(kernelId);
@@ -593,8 +593,8 @@ export function closeKernelClient(kernelId: string, reason: string = "explicit c
  * Execute `code` on `kernelId` and resolve with the collected outputs.
  *
  * Thin wrapper over a pooled `KernelClient` — the WebSocket is opened once
- * per kernel and reused. Same external contract as before: rejects on
- * timeout, returns ExecutionResult on success or kernel-side error.
+ * per kernel and reused. Contract: rejects on timeout, returns ExecutionResult
+ * on success or kernel-side error.
  */
 export async function executeCode(
   kernelId: string,
@@ -609,7 +609,7 @@ export async function executeCode(
   if (outcome.kind === "result") return outcome.result;
   // No handoffAfterMs was passed, so this branch is unreachable in practice.
   throw new Error(
-    `Unexpected handoff outcome for legacy executeCode (run_id=${outcome.runId})`
+    `Unexpected handoff outcome for non-handoff executeCode (run_id=${outcome.runId})`
   );
 }
 

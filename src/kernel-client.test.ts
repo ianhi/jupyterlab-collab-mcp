@@ -372,7 +372,7 @@ describe("KernelClient", () => {
     expect(client.lastActivityAt).toBeGreaterThanOrEqual(afterSend);
   });
 
-  // ----- Phase 2 -----
+  // ----- handoff behavior -----
 
   it("hands off when handoffAfterMs elapses; transitions to completed on reply", async () => {
     vi.useFakeTimers();
