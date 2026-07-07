@@ -1,10 +1,9 @@
 /**
  * KernelClient: a long-lived multiplexed WebSocket to a single Jupyter kernel.
  *
- * Phase 2 scope: in addition to multiplexing concurrent runs by `msg_id`,
- * each run is tracked as a `Run` state machine: `queued -> running ->
- * completed | failed`, with an extra `handed_off` terminal-for-the-caller
- * state for slow runs.
+ * In addition to multiplexing concurrent runs by `msg_id`, each run is tracked
+ * as a `Run` state machine: `queued -> running -> completed | failed`, with an
+ * extra `handed_off` terminal-for-the-caller state for slow runs.
  *
  * `run(code, opts)` supports two modes:
  *  - `timeoutMs` only (legacy): hard deadline; rejects on exceed.
@@ -15,9 +14,9 @@
  *    the kernel finally responds. Subscribers can register via
  *    `onRunSettled` to be notified.
  *
- * Retention: at most 100 finished runs kept (LRU), and completed runs
- * older than 30 minutes are evicted. In-flight (queued/running/handed_off)
- * runs are never evicted.
+ * Retention: at most MAX_RETAINED_RUNS finished runs kept (LRU), and completed
+ * runs older than COMPLETED_RUN_TTL_MS are evicted (both env-configurable).
+ * In-flight (queued/running/handed_off) runs are never evicted.
  */
 import WebSocketImpl from "ws";
 import crypto from "node:crypto";
@@ -222,8 +221,8 @@ export class KernelClient {
    * the run completed inline or was handed off.
    *
    * Overloads:
-   *   - `run(code, timeoutMs)` — legacy numeric form, same semantics as Phase 1.
-   *   - `run(code, opts)` — Phase 2 form with optional `handoffAfterMs`.
+   *   - `run(code, timeoutMs)` — numeric form: hard deadline only.
+   *   - `run(code, opts)` — options form with optional `handoffAfterMs`.
    */
   run(code: string, opts: RunOptions): Promise<RunOutcome>;
   // Legacy numeric form retained for older callers.

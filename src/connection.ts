@@ -579,8 +579,8 @@ export function getKernelClient(kernelId: string): KernelClient {
 
 /**
  * Close and remove the pooled client for `kernelId`, if any. Intended to be
- * wired into restart_kernel and disconnect flows in Phase 2 — currently
- * unwired so behaviour is identical to the old per-call implementation.
+ * wired into restart_kernel and disconnect flows; currently unwired (no caller),
+ * so a kernel's client is only reaped by idle eviction or socket close.
  */
 export function closeKernelClient(kernelId: string, reason: string = "explicit close"): void {
   const client = kernelClients.get(kernelId);

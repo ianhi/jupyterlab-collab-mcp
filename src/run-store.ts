@@ -22,7 +22,7 @@
  * Location: the MCP *host* (not the kernel FS) — this is a local recovery cache
  * for outputs the server already received. It does NOT survive the host
  * machine sleeping mid-run (the server received nothing to persist); that case
- * is Phase 3's kernel-side capture.
+ * is handled by the kernel-side capture layer (kernel-capture.ts).
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";

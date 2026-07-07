@@ -1,12 +1,12 @@
 /**
  * Kernel-side output capture — the sleep-proof recovery layer.
  *
- * The problem Phases 1–2 can't solve: if the host machine sleeps (or the
- * network hard-drops) while a handed-off run is in flight, the remote kernel
+ * The problem no host-side buffering can solve: if the host machine sleeps (or
+ * the network hard-drops) while a handed-off run is in flight, the remote kernel
  * keeps computing, finishes, and streams its output to a socket nobody is
  * reading. Jupyter's iopub is pub/sub with no replay on reconnect, so that
- * output is gone — the MCP never received it, so there was nothing to persist
- * locally.
+ * output is gone — the MCP never received it, so the in-memory run buffer and
+ * the host-side disk cache (run-store.ts) have nothing to store.
  *
  * The fix: have the *kernel* keep a copy of each slow run's output in its own
  * memory (NOT on its filesystem — no FS pollution, works on read-only /
