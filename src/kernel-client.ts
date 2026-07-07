@@ -131,13 +131,37 @@ export interface RunOptions {
   timeoutMs?: number;
   /** If set, resolve with `kind: "handoff"` after this many ms instead of rejecting. */
   handoffAfterMs?: number;
+  /**
+   * Jupyter `store_history` flag (default true). Set false for internal/tooling
+   * runs (e.g. kernel-capture install/readback) so they don't bump the kernel's
+   * execution_count or appear in In/Out history. Stream output is unaffected.
+   */
+  storeHistory?: boolean;
 }
 
 const DEFAULT_OPEN_TIMEOUT_MS = 10_000;
 /** How often to re-send the kernel_info probe until the kernel replies. */
 const KERNEL_INFO_RETRY_MS = 500;
-const MAX_RETAINED_RUNS = 100;
-const COMPLETED_RUN_TTL_MS = 30 * 60 * 1000;
+
+/** Parse a positive-integer env override, falling back to `dflt` when unset/invalid. */
+function envInt(name: string, dflt: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return dflt;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt;
+}
+
+/**
+ * Retention limits for finished runs (in-flight runs are never counted or
+ * evicted). Overridable via env for long multi-hour agent sessions:
+ *   JUPYTER_MCP_MAX_RETAINED_RUNS   (default 500)
+ *   JUPYTER_MCP_RUN_TTL_MS          (default 120 min)
+ */
+export const MAX_RETAINED_RUNS = envInt("JUPYTER_MCP_MAX_RETAINED_RUNS", 500);
+export const COMPLETED_RUN_TTL_MS = envInt(
+  "JUPYTER_MCP_RUN_TTL_MS",
+  120 * 60 * 1000
+);
 
 export class KernelClient {
   private readonly _kernelId: string;
@@ -221,6 +245,16 @@ export class KernelClient {
 
   getRun(runId: string): Run | undefined {
     return this.runs.get(runId);
+  }
+
+  /**
+   * True if any run is queued, running, or handed_off (i.e. the kernel may
+   * still produce output for it). Handed-off runs stay in `inFlight` until the
+   * kernel finally responds, so this also guards against idle-evicting a client
+   * whose slow run hasn't landed yet.
+   */
+  hasActiveRuns(): boolean {
+    return this.inFlight.size > 0;
   }
 
   /** Most-recent-first list of recent runs. */
@@ -349,7 +383,7 @@ export class KernelClient {
         content: {
           code,
           silent: false,
-          store_history: true,
+          store_history: opts.storeHistory ?? true,
           user_expressions: {},
           allow_stdin: false,
           stop_on_error: true,

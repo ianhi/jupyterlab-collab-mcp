@@ -13,6 +13,8 @@ import { type ExecutionResult } from "./helpers.js";
 import { KernelClient } from "./kernel-client.js";
 import { notifyHandoffComplete } from "./notifications.js";
 import { backfillRunOutputs } from "./handoff-targets.js";
+import { persistRun } from "./run-store.js";
+import { ensureCaptureInstalled } from "./kernel-capture.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -496,7 +498,13 @@ export const kernelClients = new Map<string, KernelClient>();
  * is closed and removed on the next sweep so we don't leak sockets for
  * kernels the user has forgotten about.
  */
-const IDLE_EVICTION_MS = 5 * 60 * 1000;
+// Idle eviction closes a pooled kernel client after this long with no activity.
+// Overridable via JUPYTER_MCP_IDLE_EVICTION_MS for long agent sessions.
+const IDLE_EVICTION_MS = (() => {
+  const raw = process.env.JUPYTER_MCP_IDLE_EVICTION_MS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5 * 60 * 1000;
+})();
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
 
 let idleSweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -506,6 +514,10 @@ function ensureIdleSweep(): void {
   idleSweepTimer = setInterval(() => {
     const now = Date.now();
     for (const [kernelId, client] of kernelClients) {
+      // Never evict a client that still has a queued/running/handed_off run —
+      // closing it would mark a live computation as failed and discard its
+      // (still-arriving) output. Only reap genuinely idle clients.
+      if (client.hasActiveRuns()) continue;
       if (now - client.lastActivityAt > IDLE_EVICTION_MS) {
         client.close("idle eviction");
         // onClose handler removes from the map, but be defensive.
@@ -540,6 +552,10 @@ export function getKernelClient(kernelId: string): KernelClient {
   // produce no notification.
   client.onRunSettled((run) => {
     if (!run.wasHandedOff) return;
+    // Durably cache the final output so get_cell_run_output can still serve it
+    // after the in-memory record is evicted / the client is reaped / the MCP
+    // restarts. Fire-and-forget; failures never block the notification.
+    persistRun(run);
     // Backfill the originating notebook cell's outputs (if we registered
     // a target for this run). Silent no-op when the notebook was
     // disconnected or the cell was deleted.
@@ -583,9 +599,13 @@ export function closeKernelClient(kernelId: string, reason: string = "explicit c
 export async function executeCode(
   kernelId: string,
   code: string,
-  timeoutMs: number = 30000
+  timeoutMs: number = 30000,
+  opts: { storeHistory?: boolean } = {}
 ): Promise<ExecutionResult> {
-  const outcome = await getKernelClient(kernelId).run(code, { timeoutMs });
+  const outcome = await getKernelClient(kernelId).run(code, {
+    timeoutMs,
+    storeHistory: opts.storeHistory,
+  });
   if (outcome.kind === "result") return outcome.result;
   // No handoffAfterMs was passed, so this branch is unreachable in practice.
   throw new Error(
@@ -602,7 +622,24 @@ export async function executeCodeWithHandoff(
   code: string,
   opts: { timeoutMs?: number; handoffAfterMs?: number }
 ): Promise<import("./kernel-client.js").RunOutcome> {
-  return getKernelClient(kernelId).run(code, opts);
+  const client = getKernelClient(kernelId);
+  // Kernel-side capture makes a handoff-eligible run's output survive a mid-run
+  // disconnect (see kernel-capture.ts). Fire — do NOT await: this queues the
+  // one-time harness install just ahead of the user's run on the socket (the
+  // kernel is single-threaded FIFO, so the harness installs first and the run
+  // is captured), while adding zero latency to the user's run. Best-effort.
+  if (opts.handoffAfterMs !== undefined) {
+    void ensureCaptureInstalled(kernelId);
+  }
+  const outcome = await client.run(code, opts);
+  // On handoff, durably snapshot the still-running run so its state survives an
+  // MCP restart / dropped socket. It's re-persisted with final output when the
+  // run later settles (see onRunSettled). Fire-and-forget.
+  if (outcome.kind === "handoff") {
+    const run = client.getRun(outcome.runId);
+    if (run) persistRun(run);
+  }
+  return outcome;
 }
 
 /** Look up a run across every pooled KernelClient (or just one if kernelId is supplied). */
@@ -621,6 +658,24 @@ export function findRun(
     if (run) return { client, run };
   }
   return undefined;
+}
+
+/**
+ * Enumerate recent runs across every pooled KernelClient (or just one if
+ * `kernelId` is supplied), most-recent-first. Lets a caller discover run_ids
+ * and their states instead of blindly holding an id that may be gone.
+ */
+export function listRuns(
+  kernelId?: string
+): { client: KernelClient; run: import("./kernel-client.js").Run }[] {
+  const clients = kernelId
+    ? ([kernelClients.get(kernelId)].filter(Boolean) as KernelClient[])
+    : [...kernelClients.values()];
+  const out: { client: KernelClient; run: import("./kernel-client.js").Run }[] = [];
+  for (const client of clients) {
+    for (const run of client.recentRuns()) out.push({ client, run });
+  }
+  return out;
 }
 
 // ============================================================================
