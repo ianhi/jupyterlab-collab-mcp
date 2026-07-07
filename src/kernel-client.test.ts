@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import {
   KernelClient,
+  MAX_RETAINED_RUNS,
   type KernelWebSocket,
   type RunOutcome,
 } from "./kernel-client.js";
@@ -481,8 +482,33 @@ describe("KernelClient", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 
+  it("hasActiveRuns() reflects in-flight/handed_off runs (guards idle eviction)", async () => {
+    const client = makeClient();
+    expect(client.hasActiveRuns()).toBe(false);
+
+    vi.useFakeTimers();
+    const handoff = client.run("slow", { handoffAfterMs: 100 });
+    fake.fireOpen();
+    await Promise.resolve();
+    await Promise.resolve();
+    const msgId = fake.lastMsgId();
+    await vi.advanceTimersByTimeAsync(200);
+    const o = await handoff;
+    vi.useRealTimers();
+    expect(o.kind).toBe("handoff");
+
+    // Handed-off run is still in flight on the kernel → client is "active"
+    // and must not be idle-evicted.
+    expect(client.hasActiveRuns()).toBe(true);
+
+    // Kernel finally responds → run settles → no longer active.
+    fake.fireMessage(replyOk(msgId, 1));
+    await Promise.resolve();
+    expect(client.hasActiveRuns()).toBe(false);
+  });
+
   it("retention: in-flight runs are never evicted, completed runs are LRU-capped", async () => {
-    // We need to drive enough runs to exceed MAX_RETAINED_RUNS (100).
+    // We need to drive enough runs to exceed MAX_RETAINED_RUNS.
     // Use a fresh client and synchronously complete each run.
     const client = makeClient();
     // First, start one in-flight handed-off run that must never be evicted.
@@ -497,8 +523,8 @@ describe("KernelClient", () => {
     expect(o.kind).toBe("handoff");
     vi.useRealTimers();
 
-    // Now generate 105 completed runs.
-    for (let i = 0; i < 105; i++) {
+    // Now generate enough completed runs to exceed the LRU cap.
+    for (let i = 0; i < MAX_RETAINED_RUNS + 5; i++) {
       const p = client.run(`c${i}`, { timeoutMs: 5000 });
       await Promise.resolve();
       await Promise.resolve();
@@ -511,7 +537,7 @@ describe("KernelClient", () => {
     expect(stillThere).toBeDefined();
     expect(stillThere!.state).toBe("handed_off");
 
-    // Completed runs are LRU-capped — total tracked at most 100 + 1 in-flight.
-    expect(client.recentRuns().length).toBeLessThanOrEqual(101);
+    // Completed runs are LRU-capped — total tracked at most MAX_RETAINED_RUNS + 1 in-flight.
+    expect(client.recentRuns().length).toBeLessThanOrEqual(MAX_RETAINED_RUNS + 1);
   });
 });

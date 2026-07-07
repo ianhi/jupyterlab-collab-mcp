@@ -36,16 +36,20 @@ chosen automatically:
    specific cells you need (don't dump the whole notebook).
 3. Edit with \`insert_cell\` / \`update_cell\`, addressing cells by \`cell_id\`
    rather than index (see the \`editing\` topic).
-4. Run with \`execute_cell\` (an existing notebook cell) or \`execute_code\`
-   (throwaway code in the kernel).
+4. Run it: \`insert_cell(execute=true)\` to add-and-run new code (the default —
+   saved in the notebook), \`execute_cell\` to (re)run an existing cell, or
+   \`execute_code\` for throwaway probes only.
 5. Verify outputs; narrow large ones with \`filter_output\`.
 
-### Two ways to run code
-- \`execute_code\` — runs a string in the kernel. Does **not** touch the
-  notebook. Use for scratch checks, inspecting state, or running source you
-  already have.
+### Ways to run code (prefer cells)
+- \`insert_cell(execute=true)\` / \`update_cell(execute=true)\` — add or change a
+  cell, run it, and return its output in one call. **The default for anything
+  worth keeping**: code and output are saved in the notebook and visible to the
+  human.
 - \`execute_cell\` — runs an existing cell *by index or id* and writes outputs
   back into the notebook. Use to (re)run cells the user can see.
+- \`execute_code\` — runs a string in the kernel without touching the notebook.
+  Output isn't saved. Use only for scratch checks you'd throw away anyway.
 
 The kernel keeps state between calls — load expensive data once and iterate
 against the live objects rather than re-running setup each time (see the
@@ -82,8 +86,21 @@ Kernel tools (\`execute_code\`, \`kernel\`) work without it.`,
 
   execution: `## Executing code
 
-- \`execute_cell\` runs a notebook cell and stores its outputs; \`execute_code\`
-  runs ad-hoc code in the kernel without modifying the notebook.
+- **Default to running code as a cell, not \`execute_code\`.** \`insert_cell(execute=true)\`
+  (or \`update_cell(execute=true)\`) is a *single call* that adds the cell, runs it,
+  and returns the output — same ergonomics as \`execute_code\`, but the code and
+  its result are visible to the human and **saved in the notebook**. Reserve
+  \`execute_code\` for genuine throwaway probes whose output you don't need to keep
+  (a quick \`type(x)\`, a \`.shape\` check). Rule of thumb: if the result matters or
+  someone might want to see it later, it belongs in a cell.
+- \`execute_cell\` runs an *existing* notebook cell and stores its outputs;
+  \`execute_code\` runs ad-hoc code in the kernel without modifying the notebook.
+- **Durability of \`execute_code\` output:** a handed-off \`execute_code\` result
+  lives only in an in-memory run buffer (retained ~500 runs / ~120 min), backed
+  by a local disk cache and a best-effort kernel-side recovery layer. That's a
+  safety net, not a guarantee — a cell's output is saved in the notebook and is
+  the durable choice. For results you must not lose (long benchmarks), run as a
+  cell or write to a file.
 - **Long-running cells:** pass \`handoff_after_ms\` (e.g. 5000) plus a \`timeout\`
   larger than the expected runtime. If the run exceeds \`handoff_after_ms\` you
   get a \`run_id\` back immediately (you are not blocked) and a
@@ -109,10 +126,11 @@ then iterate against the live objects instead of repeating setup. Use
 all that state).
 
 Mind the visibility tradeoff: \`execute_code\` is fast for throwaway probes but
-is **invisible to the human and not saved**. When an experiment matters — or a
-collaborator is watching — promote it into a notebook cell
-(\`insert_cell\`/\`execute_cell\`) so the code and its output are visible in the
-notebook and reproducible later.`,
+is **invisible to the human and not durably saved**. This is why cells are the
+default (see the \`execution\` topic): \`insert_cell(execute=true)\` is the same
+single call but the code and output live in the notebook — visible to a watching
+collaborator and reproducible later. Keep \`execute_code\` for checks you'd throw
+away anyway.`,
 
   collaboration: `## Sharing a notebook with a human
 

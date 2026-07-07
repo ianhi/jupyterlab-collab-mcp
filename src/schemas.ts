@@ -264,7 +264,7 @@ export const toolSchemas = [
   {
     name: "insert_cell",
     description:
-      "Insert a cell. Set execute=true to run it immediately.",
+      "Insert a cell. Set execute=true to run it immediately and return its output — a single-call, durable alternative to execute_code (code+output are saved in the notebook and visible to the human). Supports handoff_after_ms for long runs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -447,7 +447,7 @@ export const toolSchemas = [
   {
     name: "execute_code",
     description:
-      "Run code in kernel without modifying the notebook. Use insert_cell(execute=true) to also add it as a cell.",
+      "Run throwaway code in the kernel without modifying the notebook — for quick probes whose output you don't need to keep. Output is NOT saved and only briefly retained. For anything worth keeping or showing a human, prefer insert_cell(execute=true): same single call, but code+output are saved in the notebook.",
     inputSchema: {
       type: "object",
       properties: {
@@ -481,6 +481,21 @@ export const toolSchemas = [
         include_images: { type: "boolean", description: "Return images. Default: true" },
       },
       required: ["run_id"],
+    },
+  },
+  {
+    name: "list_runs",
+    description:
+      "List recent kernel runs (from execute_cell/execute_code) and their states (queued/running/handed_off/completed/failed), most-recent-first. Use this to discover a run_id or check whether a handed-off run is still executing vs. finished vs. evicted, instead of blindly holding an id that may be gone.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kernel_id: {
+          type: "string",
+          description: "Optional: only list runs for this kernel. If omitted, all pooled kernels are included.",
+        },
+        limit: { type: "number", description: "Max runs to return. Default: 30" },
+      },
     },
   },
   {

@@ -15,9 +15,39 @@ import {
   type OutputFilterOptions,
 } from "../helpers.js";
 import { readNotebook, writeNotebook, resolveNotebookPath } from "../notebook-fs.js";
-import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, executeCodeWithHandoff, findRun, cacheExecution, getCachedExecution } from "../connection.js";
+import { isJupyterConnected, listNotebookSessions, connectToNotebook, executeCode, executeCodeWithHandoff, findRun, listRuns, cacheExecution, getCachedExecution } from "../connection.js";
 import { registerHandoffTarget } from "../handoff-targets.js";
+import { MAX_RETAINED_RUNS, COMPLETED_RUN_TTL_MS } from "../kernel-client.js";
+import { loadPersistedRun } from "../run-store.js";
+import { retrieveCapturedRun, type CapturedRun } from "../kernel-capture.js";
 import type { ExecutionResult } from "../helpers.js";
+
+/** Human-readable retention window, e.g. "~500 runs / ~120 min". */
+function retentionWindow(): string {
+  const mins = Math.round(COMPLETED_RUN_TTL_MS / 60000);
+  return `~${MAX_RETAINED_RUNS} runs / ~${mins} min`;
+}
+
+/** Render a run recovered from the kernel's in-memory capture into text. */
+function renderCapturedRun(cap: CapturedRun): ToolResult {
+  const parts: string[] = [];
+  parts.push(
+    `Run ${cap.run_id} on kernel — recovered from the kernel's in-memory capture ` +
+      `(the live connection had dropped; the kernel finished anyway).\n` +
+      `status=${cap.status}` +
+      (cap.execution_count != null ? `, execution_count=${cap.execution_count}` : "") +
+      `, duration≈${Math.round(cap.duration_ms / 1000)}s`
+  );
+  if (cap.stdout) parts.push(`--- stdout ---\n${cap.stdout}`);
+  if (cap.stderr) parts.push(`--- stderr / traceback ---\n${cap.stderr}`);
+  if (cap.result_repr) parts.push(`--- result ---\n${cap.result_repr}`);
+  if (cap.truncated) parts.push(`(Note: capture was truncated for size.)`);
+  parts.push(
+    `Note: this recovery layer captures text (stdout/stderr/result), not rich ` +
+      `outputs like images. For those, re-run as a notebook cell or write to a file.`
+  );
+  return { content: [{ type: "text", text: parts.join("\n") }] };
+}
 
 function formatHandoffMessage(
   runId: string,
@@ -31,7 +61,9 @@ function formatHandoffMessage(
     `⏱ Execution exceeded ${handoffMs}ms — handed off.\n` +
     `run_id: ${runId}\n` +
     `Partial output (${lines.length} lines):\n${preview}${more}\n` +
-    `You'll be notified when the run terminates; fetch the result with get_cell_run_output(run_id="${runId}").`
+    `You'll be notified when the run terminates; fetch the result with get_cell_run_output(run_id="${runId}").\n` +
+    `Retention: the result is kept for ${retentionWindow()} after it finishes — fetch it within that window. ` +
+    `For results you must not lose, run it as a notebook cell (its output is saved in the notebook) or write to a file.`
   );
 }
 
@@ -296,14 +328,93 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     }
     const found = findRun(run_id, kernel_id);
     if (!found) {
+      // In-memory record is gone. Fall back to the durable disk cache: a
+      // handed-off run is snapshotted there on handoff and again on settle.
+      const persisted = await loadPersistedRun(run_id);
+      if (persisted) {
+        const truncNote = persisted.truncated
+          ? `\n(Note: output was truncated when cached to disk.)`
+          : "";
+        if (persisted.state === "completed") {
+          // A genuine terminal result (may carry status="error" for a real
+          // Python exception) — serve it directly.
+          const result: ExecutionResult = {
+            status: persisted.status,
+            executionCount: persisted.executionCount,
+            outputs: persisted.outputs,
+            text: persisted.text,
+            images: persisted.images,
+            html: persisted.html,
+          };
+          const content = buildExecutionContent(result, "", { max_images, include_images });
+          content[0].text =
+            `Run ${run_id} on kernel ${persisted.kernelId} completed (status=${persisted.status}) — recovered from disk cache.\n` +
+            content[0].text +
+            truncNote;
+          return { content };
+        }
+        // state is "failed" (a socket/timeout loss, not a Python error) or a
+        // stale still-running snapshot. In both cases the kernel may have
+        // finished during the outage — try its in-memory capture first.
+        const recovered = await retrieveCapturedRun(persisted.kernelId, run_id);
+        if (recovered) return renderCapturedRun(recovered);
+        if (persisted.state === "failed") {
+          const result: ExecutionResult = {
+            status: persisted.status,
+            executionCount: persisted.executionCount,
+            outputs: persisted.outputs,
+            text: persisted.text,
+            images: persisted.images,
+            html: persisted.html,
+          };
+          const content = buildExecutionContent(result, "", { max_images, include_images });
+          content[0].text =
+            `Run ${run_id} on kernel ${persisted.kernelId} lost its connection before finishing ` +
+            `(${persisted.errorMessage ?? "no message"}); the kernel's in-memory capture had nothing for it, ` +
+            `so this is the last partial output seen — recovered from disk cache.\n` +
+            content[0].text +
+            truncNote;
+          return { content };
+        }
+        // A stale still-running snapshot: the live record is gone but the last
+        // durable trace shows it hadn't finished. We can't know its current state.
+        const ageMin = Math.round((Date.now() - persisted.persistedAt) / 60000);
+        const preview = persisted.text
+          ? persisted.text.split("\n").slice(0, 20).join("\n")
+          : "(no output captured yet)";
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Run ${run_id} on kernel ${persisted.kernelId}: last durable snapshot (~${ageMin} min ago) shows it was still ${persisted.state}, ` +
+                `but the live record is gone (MCP restart or dropped connection), so its current state is unknown.\n` +
+                `Partial output as of that snapshot:\n${preview}${truncNote}\n` +
+                `The kernel may have finished since. Re-check the notebook cell output, inspect kernel_variables, or re-run.`,
+            },
+          ],
+        };
+      }
+      // Last resort: no local trace at all, but if the caller named a kernel we
+      // can still ask that kernel's in-memory capture directly.
+      if (kernel_id) {
+        const recovered = await retrieveCapturedRun(kernel_id, run_id);
+        if (recovered) return renderCapturedRun(recovered);
+      }
       return {
         content: [
           {
             type: "text",
             text:
-              `No run found for run_id="${run_id}"` +
-              (kernel_id ? ` on kernel ${kernel_id}.` : ` in any pooled kernel.`) +
-              ` It may have been evicted from history (retention is ~100 runs / 30 min).`,
+              `No run record found for run_id="${run_id}"` +
+              (kernel_id ? ` on kernel ${kernel_id}.` : ` in any pooled kernel or the disk cache.`) +
+              `\nThe record is gone — this does NOT necessarily mean the computation failed. Likely causes:\n` +
+              `  • evicted from history (retention is ${retentionWindow()} after completion);\n` +
+              `  • the kernel client was reaped after a long idle period, or the MCP server restarted;\n` +
+              `  • the connection dropped while the run was in flight (e.g. the machine slept).\n` +
+              `The kernel may still be computing or already done. To recover: re-check the notebook cell's ` +
+              `output if this was a cell run, inspect kernel_variables for a result variable, or re-run it. ` +
+              `For results you can't afford to lose, run as a notebook cell or write to a file.`,
           },
         ],
         isError: true,
@@ -325,7 +436,27 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
         ],
       };
     }
-    // Terminal state: completed or failed
+    // state === "failed" means a socket/timeout loss (a real Python error is
+    // recorded as state="completed", status="error"). The kernel may actually
+    // have finished — try its in-memory capture before reporting the failure.
+    if (run.state === "failed") {
+      const recovered = await retrieveCapturedRun(client.kernelId, run_id);
+      if (recovered) return renderCapturedRun(recovered);
+      const result: ExecutionResult = {
+        status: run.status,
+        executionCount: run.executionCount,
+        outputs: run.outputs,
+        text: run.text,
+        images: run.images,
+        html: run.html,
+      };
+      const content = buildExecutionContent(result, "", { max_images, include_images });
+      content[0].text =
+        `Run ${run_id} on kernel ${client.kernelId} failed: ${run.errorMessage ?? "(no message)"}\n` +
+        content[0].text;
+      return { content };
+    }
+    // Completed (may carry status="error" for a real Python exception).
     const result: ExecutionResult = {
       status: run.status,
       executionCount: run.executionCount,
@@ -335,12 +466,50 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       html: run.html,
     };
     const content = buildExecutionContent(result, "", { max_images, include_images });
-    const header =
-      run.state === "completed"
-        ? `Run ${run_id} on kernel ${client.kernelId} completed (status=${run.status}).\n`
-        : `Run ${run_id} on kernel ${client.kernelId} failed: ${run.errorMessage ?? "(no message)"}\n`;
-    content[0].text = header + content[0].text;
+    content[0].text =
+      `Run ${run_id} on kernel ${client.kernelId} completed (status=${run.status}).\n` + content[0].text;
     return { content };
+  },
+
+  "list_runs": async (args) => {
+    const { kernel_id, limit } = args as { kernel_id?: string; limit?: number };
+    const max = Math.min(Math.max(limit ?? 30, 1), 200);
+    const runs = listRuns(kernel_id).slice(0, max);
+    if (runs.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: kernel_id
+              ? `No runs recorded for kernel ${kernel_id}.`
+              : `No runs recorded in any pooled kernel. (Runs appear here after execute_cell/execute_code; evicted runs are not listed.)`,
+          },
+        ],
+      };
+    }
+    const now = Date.now();
+    const lines = runs.map(({ client, run }) => {
+      const age = run.completedAt
+        ? `${Math.round((now - run.completedAt) / 1000)}s ago`
+        : `${Math.round((now - run.startedAt) / 1000)}s running`;
+      const active = run.state === "queued" || run.state === "running" || run.state === "handed_off";
+      const detail = active
+        ? `${run.text ? run.text.split("\n").length : 0} lines so far`
+        : `status=${run.status}${run.errorMessage ? `: ${run.errorMessage.split("\n")[0]}` : ""}`;
+      const ho = run.wasHandedOff ? " [handed off]" : "";
+      return `${run.state}${ho}  run_id=${run.id}  kernel=${client.kernelId}  ${age}  ${detail}`;
+    });
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `Recent runs (most recent first, ${runs.length} shown):\n` +
+            lines.join("\n") +
+            `\nFetch any run's output with get_cell_run_output(run_id=...).`,
+        },
+      ],
+    };
   },
 
   "clear_outputs": async (args) => {

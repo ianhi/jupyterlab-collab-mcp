@@ -15,24 +15,45 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 ```
 src/
 ├── index.ts        # MCP server entry point
-├── handlers/       # 41 tool handlers by category
+├── handlers/       # 42 tool handlers by category
 │   ├── connection.ts   # connect, list_files/notebooks/kernels, open/create/rename
 │   ├── cell-read.ts    # get_content/outline, search, replace, diff
 │   ├── cell-write.ts   # insert/update/delete/copy cells, batch ops
-│   ├── execute.ts      # execute_cell/code, filter_output, outputs
+│   ├── execute.ts      # execute_cell/code, filter_output, outputs, list_runs, get_cell_run_output
 │   ├── metadata.ts     # cell_metadata, notebook_metadata, cell_tags (incl. find)
 │   ├── kernel-lsp.ts   # kernel (status/interrupt/restart), kernel_variables, diagnostics, hover, rename
 │   ├── collab.ts       # focus, history, changes, recover, snapshot, cell_locks, report_issue
 │   └── guide.ts        # notebook_guide (on-demand best-practices doc)
 ├── connection.ts   # Jupyter connection state, session management, kernel execution
-├── schemas.ts      # All 41 tool schema definitions
+├── schemas.ts      # All 42 tool schema definitions
 ├── helpers.ts      # Utilities (cell extraction, diffing, output formatting, ANSI stripping)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb)
+├── kernel-client.ts # Long-lived per-kernel WS; run state machine + retention
+├── run-store.ts    # Bounded disk cache of handed-off run outputs (host-side)
+├── kernel-capture.ts # In-kernel-memory output capture (sleep-proof recovery)
 ├── rename.ts       # Scope-aware Python rename via jedi
 ├── cell-tracker.ts # Per-notebook change tracking
 ├── snapshots.ts    # Named notebook checkpoints
 └── cell-locks.ts   # Advisory cell locking
 ```
+
+## Handed-off run durability (execute_code / *_cell with handoff_after_ms)
+
+Slow runs hand back a `run_id`; the output must survive until fetched. Three layers:
+1. **In-memory** run buffer per kernel (`kernel-client.ts`) — retained
+   ~500 runs / ~120 min; in-flight runs are never idle-evicted.
+2. **Disk cache** (`run-store.ts`) — host-side, bounded (count/bytes/TTL); survives
+   MCP restart, eviction, dropped sockets. `get_cell_run_output` falls back to it.
+3. **Kernel-side capture** (`kernel-capture.ts`) — IPython harness keeps slow-run
+   output in the *kernel's* RAM (no FS writes); recovered via a fresh execute after
+   a disconnect (the only layer surviving host sleep). `state==="failed"` on a run
+   means a socket loss (not a Python error) and triggers this recovery.
+
+Tunable via env (all optional): `JUPYTER_MCP_IDLE_EVICTION_MS`,
+`JUPYTER_MCP_MAX_RETAINED_RUNS`, `JUPYTER_MCP_RUN_TTL_MS`,
+`JUPYTER_MCP_RUN_STORE_{DIR,MAX_FILES,MAX_BYTES,TTL_MS,MAX_TEXT,MAX_IMAGES}`,
+`JUPYTER_MCP_KERNEL_CAPTURE_{MIN_MS,MAX_RUNS,MAX_CHARS}`,
+`JUPYTER_MCP_DISABLE_KERNEL_CAPTURE`.
 
 ## Development
 

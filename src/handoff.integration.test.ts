@@ -84,6 +84,10 @@ describe("handoff integration", () => {
   let fake: FakeWebSocket;
 
   beforeEach(() => {
+    // Kernel-side capture would issue an extra install run on the fake socket
+    // (which never replies). This test exercises the handoff lifecycle, not
+    // capture — disable it here.
+    process.env.JUPYTER_MCP_DISABLE_KERNEL_CAPTURE = "1";
     setJupyterConfig(config);
     setNotifier(null);
     kernelClients.clear();
@@ -91,6 +95,7 @@ describe("handoff integration", () => {
   });
 
   afterEach(() => {
+    delete process.env.JUPYTER_MCP_DISABLE_KERNEL_CAPTURE;
     setJupyterConfig(null);
     setNotifier(null);
     kernelClients.clear();
