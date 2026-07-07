@@ -4,6 +4,18 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-07
+
+### Added
+- **Durable handed-off run outputs** — a run handed off via `handoff_after_ms` returned a `run_id` whose output lived only in an in-memory buffer that could be evicted (by a 5-min idle sweep, a 30-min TTL, a 100-run cap, or a dropped socket) before `get_cell_run_output` fetched it, causing silent "No run found" losses. Output is now durable across three layers: a hardened in-memory buffer, a bounded host-side disk cache (`run-store.ts`), and an in-kernel-memory capture harness (`kernel-capture.ts`) that survives a mid-run disconnect/host sleep and is recovered via a fresh execute after reconnect. (#15)
+- **`list_runs` tool** — enumerate recent kernel runs and their states (queued/running/handed_off/completed/failed) so callers can discover a `run_id` or tell "still running" from "evicted" instead of blindly holding an id. (#15)
+
+### Changed
+- **In-flight runs are never idle-evicted** — the idle sweep now skips any kernel with a queued/running/handed-off run, so a live computation is no longer closed and marked failed. (#15)
+- **Higher, configurable run retention** — defaults raised (100→500 runs, 30→120 min) and made overridable via env (`JUPYTER_MCP_MAX_RETAINED_RUNS`, `JUPYTER_MCP_RUN_TTL_MS`, `JUPYTER_MCP_IDLE_EVICTION_MS`, plus `JUPYTER_MCP_RUN_STORE_*` and `JUPYTER_MCP_KERNEL_CAPTURE_*`; kernel-side capture can be disabled with `JUPYTER_MCP_DISABLE_KERNEL_CAPTURE`). (#15)
+- **Clearer run messages** — the handoff response states the real retention window, and `get_cell_run_output` distinguishes "still running" from "evicted/gone" instead of a blanket "No run found". (#15)
+- **Guidance steers toward cells** — `notebook_guide` and the `execute_code`/`insert_cell` tool descriptions now make `insert_cell(execute=true)` the default (one call; code and output saved in the notebook) and reserve `execute_code` for throwaway probes. (#15)
+
 ## [0.12.0] - 2026-07-06
 
 ### Added
