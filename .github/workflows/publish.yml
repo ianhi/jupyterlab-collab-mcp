@@ -55,5 +55,10 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to npm (trusted publishing)
-        run: npm publish --provenance --access public
+      # NOTE: --provenance is temporarily disabled. The npm available on the
+      # runner (both bundled and any `-g` reinstall) is missing the `sigstore`
+      # module its provenance path requires ("Cannot find module 'sigstore'"),
+      # so `npm publish --provenance` fails regardless of version. Re-add
+      # `--provenance` once the runner's npm bundles sigstore again.
+      - name: Publish to npm
+        run: npm publish --access public
