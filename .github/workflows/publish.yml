@@ -43,22 +43,20 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
 
-      # NOTE: do NOT `npm install -g npm@…` here. Reinstalling npm over itself in
-      # the runner produced an npm whose libnpmpublish couldn't find its
-      # `sigstore` dependency ("Cannot find module 'sigstore'"), breaking
-      # `npm publish --provenance` regardless of the pinned version. The npm
-      # bundled with the Node runtime is a complete install and publishes fine
-      # (provenance is supported on npm >= 9.5 with NODE_AUTH_TOKEN).
+      # Pin npm to 11.18.0 (the last 11.x, and the version that published 0.13.0
+      # with trusted publishing + provenance). Do NOT use npm@latest: npm 12.0.0
+      # (2026-07-08) shipped a broken provenance path missing its `sigstore`
+      # module ("Cannot find module 'sigstore'"), so an unpinned @latest breaks
+      # `npm publish --provenance` for any release after that date. Bump this pin
+      # deliberately once a known-good newer npm is verified.
+      - name: Pin npm for trusted publishing
+        run: npm install -g npm@11.18.0
+
       - name: Install dependencies
         run: npm ci
 
       - name: Build
         run: npm run build
 
-      # NOTE: --provenance is temporarily disabled. The npm available on the
-      # runner (both bundled and any `-g` reinstall) is missing the `sigstore`
-      # module its provenance path requires ("Cannot find module 'sigstore'"),
-      # so `npm publish --provenance` fails regardless of version. Re-add
-      # `--provenance` once the runner's npm bundles sigstore again.
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Publish to npm (trusted publishing)
+        run: npm publish --provenance --access public
