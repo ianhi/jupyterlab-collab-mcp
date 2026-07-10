@@ -46,6 +46,10 @@ uv.lock
 # Test environment (local only)
 test-jupyter/
 
+# jupyter-collaboration local state (per-machine; never commit)
+.jupyter/
+.jupyter_ystore*
+
 # Docs build artifacts
 docs/dist/
 docs/node_modules/

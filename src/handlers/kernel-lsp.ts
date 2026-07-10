@@ -16,6 +16,7 @@ import {
   getLanguageServerForFile,
   listNotebookSessions,
   connectToNotebook,
+  closeKernelClient,
   executeCode,
   apiFetch,
   type NotebookSession,
@@ -112,6 +113,13 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
       if (!response.ok) {
         throw new Error(`Failed to restart kernel: ${response.statusText}`);
       }
+
+      // Restart rebuilds the kernel's ZMQ channels, but the pooled KernelClient
+      // still has a socket in state "open" (no close fires), so a reused socket
+      // would skip the kernel_info readiness handshake and lose iopub output to
+      // the post-restart slow-joiner window. Drop the client so the next run()
+      // opens a fresh socket and re-probes readiness.
+      closeKernelClient(session.kernelId, "kernel restart");
 
       return {
         content: [

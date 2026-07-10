@@ -637,6 +637,10 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
     const results: string[] = [];
 
+    // Wrap the whole batch in one transaction so remote peers (and our own
+    // observers) never see a partial batch, and it broadcasts as a single
+    // update — matching batch_update_cells.
+    doc.transact(() => {
     for (const ins of inserts) {
       const cellType = ins.cell_type || "code";
       const newCell = new Y.Map();
@@ -683,6 +687,7 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
 
       results.push(`  [${insertIndex}] ${newId} (${cellType})`);
     }
+    });
 
     return {
       content: [

@@ -13,6 +13,7 @@ import {
   apiFetch,
   listNotebookSessions,
   connectedNotebooks,
+  saveNotebook,
 } from "../connection.js";
 import { readdir, stat, mkdir, rename as fsRename } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -273,6 +274,45 @@ export const handlers: Record<
         },
       ],
     };
+  },
+
+  save_notebook: async (args) => {
+    const { path } = args as { path: string };
+
+    if (!isJupyterConnected()) {
+      // Filesystem mode has no collaboration room to flush; edits are written to
+      // disk synchronously by each tool already.
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Not connected to JupyterLab — no collaboration room to save. In filesystem mode, edits are written to '${path}' on disk immediately by each edit tool.`,
+          },
+        ],
+      };
+    }
+
+    const { status } = await saveNotebook(path);
+    if (status === "success") {
+      return {
+        content: [{ type: "text", text: `Saved '${path}' to disk (verified).` }],
+      };
+    }
+    if (status === "skipped") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Save of '${path}' was skipped by the server (a save was already in progress, or there were no changes to write). The room content is up to date.`,
+          },
+        ],
+      };
+    }
+    // "failed" or anything unexpected → surface as a hard error (provably not persisted).
+    throw new Error(
+      `Save of '${path}' FAILED server-side (status=${status}). The edits are NOT on disk. ` +
+        `Do not edit the .ipynb directly (that reverts the room). Check the JupyterLab server logs.`
+    );
   },
 
   open_notebook: async (args) => {

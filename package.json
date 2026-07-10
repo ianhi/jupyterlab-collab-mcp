@@ -1,6 +1,6 @@
 {
   "name": "jupyterlab-collab-mcp",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "MCP server for real-time JupyterLab notebook collaboration",
   "license": "BSD-3-Clause",
   "repository": {
@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "fastest-levenshtein": "^1.0.16",
     "ws": "^8.0.0",
     "y-websocket": "^2.0.0",
     "yjs": "^13.6.0",

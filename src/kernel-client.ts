@@ -221,6 +221,13 @@ export class KernelClient {
    * the run completed inline (`timeoutMs`) or was handed off (`handoffAfterMs`).
    */
   run(code: string, opts: RunOptions): Promise<RunOutcome> {
+    // Mark activity up front. The run isn't registered in `inFlight` until the
+    // socket opens and the readiness handshake completes, so during that
+    // connect window `hasActiveRuns()` is still false; without bumping activity
+    // here the idle sweep could see "no runs + stale" and close the client out
+    // from under an in-progress execution (worst on the documented slow-joiner
+    // cold start, which stretches the connect window to seconds).
+    this._lastActivityAt = Date.now();
     // Kick off WS open synchronously so the pool sees a connecting client
     // even before the caller awaits — tests and idle eviction both rely on
     // `factoryCalls`/state being observable on the same tick.
