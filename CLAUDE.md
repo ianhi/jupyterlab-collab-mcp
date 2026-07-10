@@ -15,17 +15,17 @@ A TypeScript MCP server that connects to JupyterLab's real-time collaboration sy
 ```
 src/
 ├── index.ts        # MCP server entry point
-├── handlers/       # 42 tool handlers by category
-│   ├── connection.ts   # connect, list_files/notebooks/kernels, open/create/rename
+├── handlers/       # 44 tool handlers by category
+│   ├── connection.ts   # connect, list_files/notebooks/kernels, open/create/rename, save_notebook
 │   ├── cell-read.ts    # get_content/outline, search, replace, diff
 │   ├── cell-write.ts   # insert/update/delete/copy cells, batch ops
 │   ├── execute.ts      # execute_cell/code, filter_output, outputs, list_runs, get_cell_run_output
 │   ├── metadata.ts     # cell_metadata, notebook_metadata, cell_tags (incl. find)
 │   ├── kernel-lsp.ts   # kernel (status/interrupt/restart), kernel_variables, diagnostics, hover, rename
-│   ├── collab.ts       # focus, history, changes, recover, snapshot, cell_locks, report_issue
+│   ├── collab.ts       # focus, history, changes, recover, snapshot, cell_locks, report_issue, troubleshoot
 │   └── guide.ts        # notebook_guide (on-demand best-practices doc)
-├── connection.ts   # Jupyter connection state, session management, kernel execution
-├── schemas.ts      # All 42 tool schema definitions
+├── connection.ts   # Jupyter connection state, session management, kernel execution, forced save
+├── schemas.ts      # All 44 tool schema definitions
 ├── helpers.ts      # Utilities (cell extraction, diffing, output formatting, ANSI stripping)
 ├── notebook-fs.ts  # Filesystem backend (read/write .ipynb)
 ├── kernel-client.ts # Long-lived per-kernel WS; run state machine + retention

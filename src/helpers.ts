@@ -4,6 +4,7 @@
  */
 
 import * as Y from "yjs";
+import { trackHumanActivity, recentHumanEditInCell } from "./human-activity.js";
 
 /**
  * Strip ANSI escape codes from text.
@@ -382,39 +383,49 @@ export function updateCellOutputs(
   cell: Y.Map<any>,
   result: ExecutionResult
 ): void {
-  cell.set("execution_count", result.executionCount);
+  // Wrap the clear-then-repopulate in one transaction so remote peers never
+  // render the cell mid-update (outputs cleared but not yet re-added) and our
+  // own observers (cell-tracker, human-activity) fire once, not per mutation.
+  const apply = () => {
+    cell.set("execution_count", result.executionCount);
 
-  let outputsArray = cell.get("outputs");
-  if (!(outputsArray instanceof Y.Array)) {
-    outputsArray = new Y.Array();
-    cell.set("outputs", outputsArray);
-  }
-
-  // Clear existing outputs
-  if (outputsArray.length > 0) {
-    outputsArray.delete(0, outputsArray.length);
-  }
-
-  // Add new outputs as Y.Maps
-  for (const output of result.outputs) {
-    const outputMap = new Y.Map();
-    for (const [key, value] of Object.entries(output)) {
-      if (Array.isArray(value)) {
-        const arr = new Y.Array();
-        arr.push(value);
-        outputMap.set(key, arr);
-      } else if (typeof value === "object" && value !== null) {
-        const map = new Y.Map();
-        for (const [k, v] of Object.entries(value)) {
-          map.set(k, v);
-        }
-        outputMap.set(key, map);
-      } else {
-        outputMap.set(key, value);
-      }
+    let outputsArray = cell.get("outputs");
+    if (!(outputsArray instanceof Y.Array)) {
+      outputsArray = new Y.Array();
+      cell.set("outputs", outputsArray);
     }
-    outputsArray.push([outputMap]);
-  }
+
+    // Clear existing outputs
+    if (outputsArray.length > 0) {
+      outputsArray.delete(0, outputsArray.length);
+    }
+
+    // Add new outputs as Y.Maps
+    for (const output of result.outputs) {
+      const outputMap = new Y.Map();
+      for (const [key, value] of Object.entries(output)) {
+        if (Array.isArray(value)) {
+          const arr = new Y.Array();
+          arr.push(value);
+          outputMap.set(key, arr);
+        } else if (typeof value === "object" && value !== null) {
+          const map = new Y.Map();
+          for (const [k, v] of Object.entries(value)) {
+            map.set(k, v);
+          }
+          outputMap.set(key, map);
+        } else {
+          outputMap.set(key, value);
+        }
+      }
+      outputsArray.push([outputMap]);
+    }
+  };
+
+  // `cell.doc` is set once the cell is attached to the notebook (the normal
+  // case). Fall back to a bare call for a detached cell (no doc to transact on).
+  if (cell.doc) cell.doc.transact(apply);
+  else apply();
 }
 
 /**
@@ -582,6 +593,11 @@ export function checkHumanFocus(
   const awareness = provider.awareness;
   if (!awareness) return { blocked: false };
 
+  // Make sure we're recording human edit-activity for this doc so we can tell
+  // a cell that's being actively edited from one whose cursor is merely parked
+  // there (JupyterLab never clears the awareness cursor on blur).
+  trackHumanActivity(doc, provider);
+
   const states = awareness.getStates();
   const myClientId = awareness.clientID;
   const cells = doc.getArray("cells");
@@ -611,6 +627,19 @@ export function checkHumanFocus(
                     doc
                   );
                   if (absPos && absPos.type === source) {
+                    // The cursor is in this cell — but JupyterLab leaves a
+                    // stale cursor pinned in a cell after a mere click (or a
+                    // click on its output), so cursor presence alone means the
+                    // cell is "selected", not necessarily being edited. Only
+                    // treat it as in-use if the human has actually edited this
+                    // cell's text recently.
+                    const cellId = cell.get("id");
+                    if (
+                      typeof cellId === "string" &&
+                      !recentHumanEditInCell(doc, cellId)
+                    ) {
+                      continue; // parked cursor, not active editing
+                    }
                     return { blocked: true, user: displayName };
                   }
                 } catch {
@@ -628,26 +657,48 @@ export function checkHumanFocus(
 }
 
 /**
- * Returns a warning string when no other y-doc peers are present on the
- * notebook room (i.e. only Claude's own awareness entry). The user's
- * browser tab may not be connected, so edits won't be visible in real time.
- * Returns null when at least one other peer is present, or when no awareness
- * is available.
+ * Cheap post-edit persistence gate. Returns a warning string when we cannot be
+ * confident an edit will actually persist, else null. Never throws — the caller
+ * still succeeds (per policy: refuse only when *provably* lost; warn on doubt).
+ *
+ * Two ambiguous conditions, each with a distinct steer:
+ *  1. Provider not synced/connected — the edit may not have even reached the
+ *     server room; it's sitting in the local buffer.
+ *  2. Synced but no browser peer — the edit is in the room, but disk autosave
+ *     may not be running without a peer.
+ *
+ * Both explicitly tell the agent NOT to "save" by writing the .ipynb directly:
+ * a direct file write advances the on-disk mtime, which makes jupyter-collab
+ * revert the room to the stale disk copy (OutOfBandChanges) and lose in-room
+ * edits — the exact vicious cycle we're defending against. The durable escape
+ * hatch is the save_notebook tool, which forces a *verified* write.
  */
 export function getPeerWarning(provider: any): string | null {
+  // y-websocket exposes `synced` (initial sync done) and `wsconnected`.
+  const synced = provider?.synced === true && provider?.wsconnected !== false;
+  if (!synced) {
+    return (
+      "\n\n⚠ This notebook is NOT currently synced to JupyterLab (collab socket " +
+      "disconnected). Your edit is in the local buffer and may not have reached the " +
+      "server. Do NOT edit the .ipynb file directly to save it — a direct file write is " +
+      "reverted by jupyter-collaboration and destroys in-room edits. Re-check with " +
+      "get_notebook_content once reconnected, then use save_notebook to force a verified save."
+    );
+  }
+
   const awareness = provider?.awareness;
-  if (!awareness) return null;
-  const states = awareness.getStates();
-  const myClientId = awareness.clientID;
   let others = 0;
-  for (const clientId of states.keys()) {
-    if (clientId !== myClientId) others++;
+  if (awareness) {
+    const myClientId = awareness.clientID;
+    for (const clientId of awareness.getStates().keys()) {
+      if (clientId !== myClientId) others++;
+    }
   }
   if (others > 0) return null;
   return (
     "\n\n⚠ No browser peers connected to this notebook room — the edit reached the " +
-    "server but the user's tab may not be showing it. Ask them to refresh / reopen " +
-    "the notebook, then re-check before continuing."
+    "server room, but disk autosave may not be running without a peer. Call save_notebook " +
+    "to force a verified write to disk. Do NOT edit the .ipynb directly — that reverts the room."
   );
 }
 

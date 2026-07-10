@@ -8,6 +8,8 @@ import {
   resolveCellId,
   generateUnifiedDiff,
   formatTimeRemaining,
+  extractSource,
+  getCellType,
 } from "../helpers.js";
 import {
   readNotebook,
@@ -19,6 +21,11 @@ import {
   isJupyterConnected,
   listNotebookSessions,
   connectToNotebook,
+  getConfig,
+  apiFetch,
+  saveNotebook,
+  lspStatus,
+  rtcAvailable,
 } from "../connection.js";
 import { getNotebookCells } from "../tool-helpers.js";
 import {
@@ -622,4 +629,163 @@ export const handlers: Record<string, (args: Record<string, unknown>) => Promise
     };
   },
 
+  troubleshoot: async (args) => {
+    const { path } = args as { path?: string };
+    const lines: string[] = [];
+
+    // --- Connection health ---
+    lines.push("## Connection");
+    if (!isJupyterConnected()) {
+      lines.push(
+        "✗ Not connected to JupyterLab. Run connect_jupyter with your lab URL+token first.",
+        "",
+        "In this state, notebook edits go to the local .ipynb on disk (filesystem mode) — there is no collaboration room."
+      );
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    }
+    const cfg = getConfig();
+    lines.push(`✓ Connected: ${cfg.baseUrl}`);
+    lines.push(
+      rtcAvailable === true
+        ? "✓ jupyter-collaboration (RTC): available — cell-level tools work."
+        : rtcAvailable === false
+          ? "✗ jupyter-collaboration (RTC): NOT installed — cell-level tools cannot open notebooks."
+          : "? jupyter-collaboration (RTC): unknown (probe inconclusive)."
+    );
+    lines.push(
+      lspStatus.available
+        ? `✓ LSP: ${[...lspStatus.servers.keys()].join(", ") || "available"}`
+        : "· LSP: not available (optional)."
+    );
+
+    if (!path) {
+      lines.push(
+        "",
+        "Pass a notebook `path` to diagnose whether its edits actually sync and persist."
+      );
+      return { content: [{ type: "text", text: lines.join("\n") }] };
+    }
+
+    // --- Per-notebook diagnosis ---
+    lines.push("", `## Notebook: ${path}`);
+    const flags: string[] = [];
+
+    // Disk existence + mtime
+    let diskExists = false;
+    try {
+      const res = await apiFetch(`/api/contents/${encodeURIComponent(path)}?content=0`);
+      diskExists = res.ok;
+      if (res.ok) {
+        const meta = await res.json();
+        lines.push(`✓ File on disk: exists (last_modified ${meta.last_modified}).`);
+      } else {
+        lines.push(`✗ File on disk: not found on this server (HTTP ${res.status}).`);
+        flags.push("File is not served by the connected server — you may be pointed at the wrong server for this notebook.");
+      }
+    } catch (e: any) {
+      lines.push(`? File on disk: check failed (${e.message}).`);
+    }
+
+    // Session / kernel
+    try {
+      const sessions = await listNotebookSessions();
+      const session = sessions.find((s) => s.path === path);
+      lines.push(
+        session?.kernelId
+          ? `✓ Kernel: active (${session.kernelId.slice(0, 8)}).`
+          : "· Kernel: none (open_notebook to start one; not required for editing)."
+      );
+    } catch (e: any) {
+      lines.push(`? Kernel: session lookup failed (${e.message}).`);
+    }
+
+    // Live room sync + peers + round-trip persistence check
+    let docSig: string | null = null;
+    try {
+      const { doc, provider } = await connectToNotebook(path);
+      const synced = provider?.synced === true && provider?.wsconnected !== false;
+      lines.push(
+        synced
+          ? "✓ Sync: connected and synced to the server room."
+          : "✗ Sync: NOT synced (socket disconnected) — edits sit in the local buffer and may not reach the server."
+      );
+      if (!synced) flags.push("Provider not synced: an edit right now is not confirmed on the server.");
+
+      const awareness = provider?.awareness;
+      let peers = 0;
+      if (awareness) {
+        for (const id of awareness.getStates().keys()) if (id !== awareness.clientID) peers++;
+      }
+      lines.push(
+        peers > 0
+          ? `✓ Peers: ${peers} other client(s) in the room (e.g. your browser tab).`
+          : "· Peers: none besides this MCP — disk autosave may not run without a peer, and you can't see edits live."
+      );
+      if (peers === 0) flags.push("No browser peer: open the notebook in JupyterLab on THIS server to collaborate live.");
+
+      const cells = doc.getArray("cells");
+      docSig = contentSignature([...cells]);
+      lines.push(`· Room content: ${cells.length} cells.`);
+    } catch (e: any) {
+      lines.push(`✗ Sync: could not connect to the room (${e.message}).`);
+      flags.push("Could not open the collaboration room — edits would not sync.");
+    }
+
+    // Forced save + disk-vs-room round trip (the split-brain detector)
+    if (diskExists && docSig !== null) {
+      try {
+        const { status } = await saveNotebook(path);
+        lines.push(
+          status === "success"
+            ? "✓ Forced save: server reported success."
+            : status === "skipped"
+              ? "· Forced save: skipped (already up to date / save in progress)."
+              : `✗ Forced save: FAILED (status=${status}) — edits are NOT reaching disk.`
+        );
+        if (status === "failed") flags.push("save_notebook failed: edits are not persisting to disk.");
+
+        // Re-read disk and compare sources+types with the room.
+        const res = await apiFetch(`/api/contents/${encodeURIComponent(path)}?content=1`);
+        if (res.ok) {
+          const nb = await res.json();
+          const diskCells = nb?.content?.cells ?? [];
+          const diskSig = contentSignature(diskCells);
+          if (diskSig === docSig) {
+            lines.push("✓ Round-trip: disk matches the room — edits persist to THIS file. Healthy.");
+          } else {
+            lines.push(
+              "🛑 Round-trip: disk does NOT match the room even after a forced save."
+            );
+            flags.push(
+              "SPLIT-BRAIN: the room you are editing is not the one saved to this file. " +
+                "Almost always a second/overlapping jupyter server. Ensure ONE server per directory " +
+                "and that Claude + the browser use the SAME server URL."
+            );
+          }
+        }
+      } catch (e: any) {
+        lines.push(`? Forced save / round-trip: ${e.message}`);
+      }
+    }
+
+    // --- Verdict ---
+    lines.push("", "## Verdict");
+    if (flags.length === 0) {
+      lines.push("✓ Healthy — edits sync to the room and persist to this file.");
+    } else {
+      lines.push("⚠ Issues detected:");
+      for (const f of flags) lines.push(`  • ${f}`);
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
+  },
 };
+
+/** Order-sensitive signature of a notebook's cells (type + source only), for
+ * comparing a live room against the on-disk copy. Ignores outputs/metadata so
+ * execution state doesn't create false mismatches. */
+function contentSignature(cells: any[]): string {
+  return JSON.stringify(
+    cells.map((c) => [getCellType(c), extractSource(c)])
+  );
+}

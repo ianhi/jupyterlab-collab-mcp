@@ -48,6 +48,32 @@ export const toolSchemas = [
     },
   },
   {
+    name: "troubleshoot",
+    description:
+      "Diagnose why notebook edits may not be syncing or persisting. Reports connection/RTC health and, for a given notebook, sync state, browser peers, a forced-save result, and a disk-vs-room round-trip check that detects split-brain (wrong/second server). Use when edits don't show up in the browser or on disk.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Notebook to diagnose. Omit for connection-level checks only.",
+        },
+      },
+    },
+  },
+  {
+    name: "save_notebook",
+    description:
+      "Force a verified save of the notebook's live collaboration room to disk and report whether it persisted (success/skipped/failed). Use this to guarantee edits reach disk — NEVER edit the .ipynb file directly to 'save' it, as a direct file write is reverted by jupyter-collaboration and loses in-room edits.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Notebook path" },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "open_notebook",
     description:
       "Open a notebook and start a kernel. Safe to call if already open. Required before executing cells.",

@@ -15,6 +15,7 @@ import { notifyHandoffComplete } from "./notifications.js";
 import { backfillRunOutputs } from "./handoff-targets.js";
 import { persistRun } from "./run-store.js";
 import { ensureCaptureInstalled } from "./kernel-capture.js";
+import { trackHumanActivity } from "./human-activity.js";
 
 // ============================================================================
 // Instance identity — unique per MCP server process
@@ -414,18 +415,78 @@ export async function requestCollabSession(path: string): Promise<CollabSession>
 // Notebook connection and operations
 // ============================================================================
 
-export async function connectToNotebook(
+/**
+ * In-flight connects keyed by path. Without this, two callers requesting the
+ * SAME uncached notebook both miss the cache (the check is separated from the
+ * cache write by several awaits: session request, sync wait, awareness wait),
+ * both build a WebsocketProvider joining the same room, and the second's
+ * `connectedNotebooks.set` orphans the first — leaking a socket, a duplicate
+ * "Claude Code" presence, and its awareness/doc listeners. Coalescing on this
+ * map makes concurrent callers await one shared connect.
+ */
+const connectingNotebooks = new Map<
+  string,
+  Promise<{ doc: Y.Doc; provider: WebsocketProvider }>
+>();
+
+export function connectToNotebook(
+  path: string,
+  kernelId?: string
+): Promise<{ doc: Y.Doc; provider: WebsocketProvider }> {
+  // Check cache
+  const cached = connectedNotebooks.get(path);
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+
+  // Coalesce with any connect already in flight for this same path.
+  const inFlight = connectingNotebooks.get(path);
+  if (inFlight) return inFlight;
+
+  const promise = establishConnection(path, kernelId).finally(() => {
+    connectingNotebooks.delete(path);
+  });
+  connectingNotebooks.set(path, promise);
+  return promise;
+}
+
+async function establishConnection(
   path: string,
   kernelId?: string
 ): Promise<{ doc: Y.Doc; provider: WebsocketProvider }> {
   const config = getConfig();
 
-  // Check cache
-  const cached = connectedNotebooks.get(path);
-  if (cached) {
-    return cached;
+  // A sync-timeout / connection-error usually means the collaboration room hit
+  // a transient server-side startup failure (see ISSUE-pycrdt-yroom-start-stop-race:
+  // a YRoom that is started and torn down concurrently crashes and the client
+  // just times out). The room is typically recreated cleanly, so a short
+  // backoff-then-retry recovers instead of surfacing the timeout to the agent.
+  // Backoff-gated (not immediate) so we don't add reconnect churn that would
+  // widen the very race we're recovering from.
+  const maxAttempts = 3;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { doc, provider } = await openSyncedProvider(path, config);
+      return finishConnection(path, kernelId, doc, provider);
+    } catch (err) {
+      lastErr = err;
+      // Only retry transient room-startup failures; permanent errors
+      // (notebook not found, RTC extension absent) should fail fast.
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient = msg.includes("Sync timeout") || msg.includes("Connection error");
+      if (!transient || attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 500 * attempt));
+    }
   }
+  throw lastErr;
+}
 
+/** One connect attempt: request the session, open the provider, await sync. */
+async function openSyncedProvider(
+  path: string,
+  config: JupyterConfig
+): Promise<{ doc: Y.Doc; provider: WebsocketProvider }> {
   // Request collaboration session
   const session = await requestCollabSession(path);
 
@@ -464,6 +525,16 @@ export async function connectToNotebook(
     });
   });
 
+  return { doc, provider };
+}
+
+/** Wire awareness/activity, settle presence, and cache a synced connection. */
+async function finishConnection(
+  path: string,
+  kernelId: string | undefined,
+  doc: Y.Doc,
+  provider: WebsocketProvider
+): Promise<{ doc: Y.Doc; provider: WebsocketProvider }> {
   // Set awareness AFTER sync with all required fields for JupyterLab collaborators panel
   // Note: JupyterLab only looks for the "user" field with User.IIdentity structure
   provider.awareness.setLocalStateField("user", {
@@ -475,10 +546,191 @@ export async function connectToNotebook(
     instance_id: instanceId,
   });
 
+  // Start tracking human edit-activity so focus checks can distinguish an
+  // actively-edited cell from one whose cursor is merely parked there.
+  trackHumanActivity(doc, provider);
+
+  // Awareness (remote cursors/presence) syncs on a separate channel from the
+  // document and lands a beat AFTER the initial 'sync'. Reading getStates() the
+  // instant sync resolves often shows zero remote peers even when a human is
+  // actively in the notebook — which makes get_user_focus report "nobody here"
+  // and, more dangerously, lets checkHumanFocus green-light an edit into a cell
+  // the human occupies. Give remote awareness a brief window to arrive. This
+  // early-exits the moment any peer appears, so it only ever costs wall-clock
+  // when nobody else is actually connected — and only once per notebook (the
+  // connection is cached below).
+  await waitForRemoteAwareness(provider, 1500);
+
   // Cache connection
   connectedNotebooks.set(path, { doc, provider, kernelId });
 
   return { doc, provider };
+}
+
+/**
+ * Resolve once the provider's awareness reports at least one remote peer, or
+ * after `timeoutMs`, whichever comes first. Bounds the one-time cold-connect
+ * delay while making presence/focus reads reliable.
+ */
+function waitForRemoteAwareness(
+  provider: WebsocketProvider,
+  timeoutMs: number
+): Promise<void> {
+  const awareness = provider.awareness;
+  const hasRemotePeer = () => {
+    for (const clientId of awareness.getStates().keys()) {
+      if (clientId !== awareness.clientID) return true;
+    }
+    return false;
+  };
+
+  if (hasRemotePeer()) return Promise.resolve();
+
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      awareness.off("change", onChange);
+      resolve();
+    };
+    const onChange = () => {
+      if (hasRemotePeer()) done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    awareness.on("change", onChange);
+  });
+}
+
+// ============================================================================
+// Forced save (verified persistence to disk)
+// ============================================================================
+
+// lib0 var-uint / var-string codec — the wire format jupyter-collaboration uses
+// for its RAW control messages (see jupyter_server_ydoc/handlers.py on_message).
+// Exported for protocol tests.
+export function encodeVarUint(n: number): number[] {
+  const bytes: number[] = [];
+  let v = n;
+  do {
+    let b = v & 0x7f;
+    v = Math.floor(v / 128);
+    if (v > 0) b |= 0x80;
+    bytes.push(b);
+  } while (v > 0);
+  return bytes;
+}
+export function encodeVarString(s: string): number[] {
+  const utf8 = Buffer.from(s, "utf8");
+  return [...encodeVarUint(utf8.length), ...utf8];
+}
+export function decodeVarUint(buf: Buffer, offset: number): [number, number] {
+  let n = 0;
+  let shift = 0;
+  let o = offset;
+  for (;;) {
+    const b = buf[o++];
+    n += (b & 0x7f) * Math.pow(2, shift);
+    if ((b & 0x80) === 0) break;
+    shift += 7;
+  }
+  return [n, o];
+}
+
+/**
+ * Force jupyter-collaboration to flush the notebook's live room to disk NOW and
+ * report whether it actually persisted. Sends the same RAW "save" control
+ * message the browser's Ctrl+S uses (MessageType.RAW=2, "save", <id>), which
+ * triggers `_save_to_disc(save_now=True)` server-side, and reads the JSON reply
+ * ({status: "success"|"skipped"|"failed"}).
+ *
+ * Uses a dedicated short-lived socket rather than the pooled y-websocket
+ * provider: the provider is vanilla y-websocket, which would mis-handle the RAW
+ * reply (message type 2 collides with y-protocol's auth message).
+ */
+export async function saveNotebook(
+  path: string,
+  timeoutMs = 10000
+): Promise<{ status: string }> {
+  const config = getConfig();
+  const session = await requestCollabSession(path);
+  const roomId = `${session.format}:${session.type}:${session.fileId}`;
+  const RAW = 2;
+  const saveId = 1;
+  const url =
+    `${config.wsUrl}/api/collaboration/room/${roomId}` +
+    `?sessionId=${encodeURIComponent(session.sessionId)}&token=${encodeURIComponent(config.token)}`;
+  const message = Buffer.from([
+    ...encodeVarUint(RAW),
+    ...encodeVarString("save"),
+    ...encodeVarUint(saveId),
+  ]);
+
+  return new Promise<{ status: string }>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    let settled = false;
+
+    // Close the transient socket a beat AFTER we've resolved. Joining the room
+    // adds us to its broadcast set; closing the instant we get the save reply
+    // leaves the server writing the next broadcast frame into a dead socket
+    // (logs a harmless tornado WebSocketClosedError). A short unref'd drain lets
+    // those in-flight frames flush first. Never blocks the caller.
+    const closeSoon = () => {
+      setTimeout(() => {
+        try {
+          ws.close(1000);
+        } catch {
+          /* ignore */
+        }
+      }, 250).unref?.();
+    };
+    const closeNow = () => {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    const settleResolve = (status: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status });
+      closeSoon();
+    };
+    const settleReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      closeNow();
+      reject(err);
+    };
+    const timer = setTimeout(
+      () => settleReject(new Error(`save_notebook timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
+
+    ws.on("open", () => ws.send(message));
+    ws.on("message", (data: WebSocket.Data) => {
+      const buf = Buffer.isBuffer(data)
+        ? data
+        : Buffer.from(data as ArrayBuffer);
+      try {
+        const [type, o1] = decodeVarUint(buf, 0);
+        if (type !== RAW) return; // not a control message; ignore sync/awareness
+        const [len, o2] = decodeVarUint(buf, o1);
+        const obj = JSON.parse(buf.subarray(o2, o2 + len).toString("utf8"));
+        if (obj?.type === "save" && obj?.responseTo === saveId) {
+          settleResolve(String(obj.status ?? "unknown"));
+        }
+      } catch {
+        // Ignore anything we can't parse as our save reply.
+      }
+    });
+    ws.on("error", (err) => settleReject(err instanceof Error ? err : new Error(String(err))));
+    ws.on("close", () =>
+      settleReject(new Error("save_notebook socket closed before a save reply"))
+    );
+  });
 }
 
 // ============================================================================

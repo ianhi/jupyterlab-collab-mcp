@@ -4,6 +4,26 @@ All notable changes to the jupyterlab-collab-mcp.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-10
+
+### Added
+- **Human edit-activity tracking** (`human-activity.ts`) — the human-focus guard now distinguishes a cell being *actively edited* from one whose cursor is merely parked there. JupyterLab sets the collaborative cursor on focus but never clears it on blur, so a click left a stale cursor that made the guard over-block. Human edits are now identified by Yjs transaction origin and remembered per cell (in-memory, 10s window, `JUPYTER_MCP_HUMAN_EDIT_WINDOW_MS`); `checkHumanFocus` blocks only when the cursor is in a cell **and** a human edited it recently.
+- **`save_notebook` tool** — forces jupyter-collaboration to flush a notebook's live room to disk *now* and reports verified status (`success`/`skipped`/`failed`, `failed` → hard error). Sends the same RAW "save" control message the browser's Ctrl+S uses. Gives agents a reliable persistence path so they never resort to editing the `.ipynb` directly — a direct file write advances the on-disk mtime and makes jupyter-collaboration revert the room to the stale disk copy (`OutOfBandChanges`), silently losing in-room edits.
+- **`troubleshoot` tool** — diagnoses why edits may not sync/persist: connection + RTC health, and per-notebook sync state, browser-peer count, a forced-save result, and a **disk-vs-room round-trip check** that detects split-brain (edits going to a different room than the file is saved from — typically a second/overlapping jupyter server).
+
+### Changed
+- **Concurrent connects are coalesced** — `connectToNotebook` now dedups in-flight connects per path, so two concurrent first-connects to the same notebook no longer build two providers (leaking a socket + duplicate "Claude Code" presence).
+- **Awareness settles before presence/focus reads** — a connect now briefly waits for remote awareness to arrive, fixing false "no collaborators" and preventing an edit from being green-lit into a cell a human occupies.
+- **Transient room-startup failures auto-recover** — a sync-timeout / connection-error on connect is retried with backoff (the upstream pycrdt YRoom start/stop race can crash a cold room; the retry lets the recreated room succeed).
+- **Stronger post-edit persistence warnings** — the edit warning now detects an unsynced provider (edit only in the local buffer), stops falsely claiming "reached the server," and explicitly steers away from the fatal direct-file-write, pointing at `save_notebook`.
+- **Kernel restart invalidates the pooled client** — so the next run reopens the socket and re-runs the readiness handshake, preventing post-restart ZMQ slow-joiner output loss.
+- **Argument robustness** — `notebook_path` is accepted as an alias for `path`, and a missing required parameter now yields a schema-driven error listing accepted params + a "did you mean" suggestion instead of a cryptic `undefined`.
+
+### Fixed
+- **Idle sweep can no longer evict a kernel client mid-connect** — activity is marked before the connect handshake, so a run isn't killed during a slow cold start.
+- **Atomic batch/output mutations** — `batch_insert_cells` and `updateCellOutputs` now run in a single Y transaction, so remote peers never observe a partial batch or cleared-but-not-repopulated outputs.
+- **Durable run cache write races** — `persistRun` serializes per run_id and uses a unique temp file, so an overlapping handoff+settle write can't corrupt/clobber the on-disk snapshot.
+
 ## [0.13.0] - 2026-07-07
 
 ### Added

@@ -18,8 +18,49 @@ import {
   formatTimeRemaining,
   stripAnsi,
   filterOutputText,
+  getPeerWarning,
   type ExecutionResult,
 } from "./helpers.js";
+
+describe("getPeerWarning (post-edit persistence gate)", () => {
+  const makeProvider = (opts: {
+    synced?: boolean;
+    wsconnected?: boolean;
+    peerIds?: number[];
+    myId?: number;
+  }) => ({
+    synced: opts.synced,
+    wsconnected: opts.wsconnected,
+    awareness: {
+      clientID: opts.myId ?? 1,
+      getStates: () => new Map((opts.peerIds ?? []).map((id) => [id, {}])),
+    },
+  });
+
+  it("warns about NOT synced when the socket is disconnected", () => {
+    const w = getPeerWarning(makeProvider({ synced: false, wsconnected: false, peerIds: [1, 2] }));
+    expect(w).toContain("NOT currently synced");
+    expect(w).toContain("save_notebook");
+    // must steer away from the fatal direct file write
+    expect(w).toContain("Do NOT edit the .ipynb");
+  });
+
+  it("returns null when synced with at least one other peer", () => {
+    const w = getPeerWarning(makeProvider({ synced: true, wsconnected: true, myId: 1, peerIds: [1, 2] }));
+    expect(w).toBeNull();
+  });
+
+  it("warns about no browser peers when synced but alone", () => {
+    const w = getPeerWarning(makeProvider({ synced: true, wsconnected: true, myId: 1, peerIds: [1] }));
+    expect(w).toContain("No browser peers");
+    expect(w).toContain("save_notebook");
+  });
+
+  it("treats missing sync flag as not-synced (conservative)", () => {
+    const w = getPeerWarning(makeProvider({ peerIds: [1, 2] }));
+    expect(w).toContain("NOT currently synced");
+  });
+});
 
 describe("extractSource", () => {
   it("returns empty string for null/undefined", () => {

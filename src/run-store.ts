@@ -27,6 +27,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import type { NotebookOutput } from "./helpers.js";
 import type { Run, RunState } from "./kernel-client.js";
 
@@ -124,23 +125,48 @@ function capForStorage(run: Run): PersistedRun {
   };
 }
 
+// Serialize writes per run_id. persistRun is called at least twice for a
+// handed-off run (on handoff, then on settle); without this the two overlapping
+// fire-and-forget writes shared a fixed `.tmp` path — interleaving their bytes
+// (corrupt JSON) or letting the older handoff snapshot win the final rename and
+// clobber the newer settle snapshot. Chaining guarantees call-order (settle,
+// issued last, lands last and wins) and prevents temp-file interleave.
+const persistChains = new Map<string, Promise<void>>();
+
 /**
  * Persist a run snapshot (fire-and-forget). Call on handoff and again on
  * settle so the on-disk copy reflects the latest known state.
  */
 export function persistRun(run: Run): void {
-  void persistRunAsync(run).catch(() => {
-    // Best-effort: never let a persistence failure surface to the caller.
+  // Snapshot the record NOW (synchronously); the Run object is mutable and the
+  // actual write is deferred behind the per-run chain.
+  const rec = capForStorage(run);
+  const prev = persistChains.get(run.id) ?? Promise.resolve();
+  const next = prev
+    .then(() => persistRunAsync(run.id, rec))
+    .catch(() => {
+      // Best-effort: never let a persistence failure surface to the caller.
+    });
+  persistChains.set(run.id, next);
+  void next.finally(() => {
+    // Drop the chain entry once this is the tail, so the map doesn't grow.
+    if (persistChains.get(run.id) === next) persistChains.delete(run.id);
   });
 }
 
-async function persistRunAsync(run: Run): Promise<void> {
+async function persistRunAsync(runId: string, rec: PersistedRun): Promise<void> {
   await ensureDir();
-  const rec = capForStorage(run);
-  const file = runIdToFile(run.id);
-  const tmp = `${file}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(rec), "utf8");
-  await fs.rename(tmp, file); // atomic replace
+  const file = runIdToFile(runId);
+  // Unique temp path per write so a concurrent writer in another MCP process
+  // sharing the store dir can't interleave into the same tempfile.
+  const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(rec), "utf8");
+    await fs.rename(tmp, file); // atomic replace
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
   await enforceBounds();
 }
 
