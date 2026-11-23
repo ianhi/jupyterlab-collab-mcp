@@ -89,14 +89,14 @@ class TestPerformance:
         """Dict with 100 large numpy arrays — should not repr every element."""
         d = {f"arr_{i}": np.random.randn(1000, 100) for i in range(100)}
         elapsed = _time_ms(inspect_one, "d", d, max_items=20)
-        assert (
-            elapsed < 5
-        ), f"inspect_one on dict with 100 large arrays took {elapsed:.2f}ms (limit: 5ms)"
+        assert elapsed < 5, (
+            f"inspect_one on dict with 100 large arrays took {elapsed:.2f}ms (limit: 5ms)"
+        )
 
     def test_list_of_dataframes_under_5ms(self) -> None:
         """List of 50 DataFrames — should not repr every element."""
         lst = [pd.DataFrame({"x": range(1000)}) for _ in range(50)]
         elapsed = _time_ms(inspect_one, "lst", lst)
-        assert (
-            elapsed < 5
-        ), f"inspect_one on list of 50 DataFrames took {elapsed:.2f}ms (limit: 5ms)"
+        assert elapsed < 5, (
+            f"inspect_one on list of 50 DataFrames took {elapsed:.2f}ms (limit: 5ms)"
+        )
